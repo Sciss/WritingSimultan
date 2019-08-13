@@ -12,6 +12,8 @@ To contact the author, send an email to `contact at sciss.de`.
 With respect to the workspace thus produced, all rights are reserved.
 No reuse or changes permitted without explicit written consent.
 
+Corresponding Research Catalogue page: https://www.researchcatalogue.net/view/665526/665527
+
 ## building
 
 All sub-projects build with sbt against Scala 2.12.

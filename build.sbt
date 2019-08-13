@@ -6,6 +6,7 @@ lazy val projectVersion = "0.1.0-SNAPSHOT"
 lazy val deps = new {
   val main = new {
     val fscape          = "2.29.0-SNAPSHOT"
+    val lucre           = "3.14.0-SNAPSHOT"
     val soundProcesses  = "3.31.0-SNAPSHOT"
   }
 }
@@ -34,8 +35,12 @@ lazy val root = project.withId(baseNameL).in(file("."))
   .settings(
     name := baseName,
     libraryDependencies ++= Seq(
-      "de.sciss"  %% "soundprocesses-core"  % deps.main.soundProcesses,
-      "de.sciss"  %% "fscape-lucre"         % deps.main.fscape
-    )
+      "de.sciss"  %% "soundprocesses" % deps.main.soundProcesses,
+      "de.sciss"  %% "fscape-macros"  % deps.main.fscape,
+      "de.sciss"  %% s"lucre-bdb"     % deps.main.lucre
+    ),
+    scalacOptions += "-Yrangepos",  // this is needed to extract source code
+    fork in run := true,
+    mainClass in (Compile, run) := Some("de.sciss.writingsimultan.Main")
   )
 
