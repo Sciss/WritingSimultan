@@ -5,9 +5,9 @@ lazy val projectVersion = "0.1.0-SNAPSHOT"
 
 lazy val deps = new {
   val main = new {
-    val fscape          = "2.29.0-SNAPSHOT"
-    val lucre           = "3.14.0-SNAPSHOT"
-    val soundProcesses  = "3.31.0-SNAPSHOT"
+    val fscape          = "2.29.0"
+    val lucre           = "3.14.0"
+    val soundProcesses  = "3.31.0"
   }
 }
 
