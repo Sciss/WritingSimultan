@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/Sciss/WritingSimultan.svg?branch=master)](https://travis-ci.org/Sciss/WritingSimultan)
+
 # Writing (simultan)
 
 This repository builds the second reconfiguration of the piece 'Writing Machine', this time attempting of
