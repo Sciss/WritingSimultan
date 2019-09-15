@@ -15,9 +15,9 @@ package de.sciss.writingsimultan
 
 import de.sciss.fscape.lucre.FScape
 import de.sciss.fscape.lucre.MacroImplicits._
-import de.sciss.synth.proc.MacroImplicits._
 import de.sciss.lucre.synth.Sys
 import de.sciss.synth.proc
+import de.sciss.synth.proc.MacroImplicits._
 import de.sciss.synth.proc.Workspace
 import de.sciss.writingsimultan.BuilderUtil._
 
@@ -32,13 +32,119 @@ object Builder {
     mkObj[S, proc.Control](r, "main", DEFAULT_VERSION)(mkControlMain())
   }
 
+  protected def longWrapper: Any = ()
+
+  def mkCtlDbFill[S <: Sys[S]]()(implicit tx: S#Tx): proc.Control[S] = {
+    val c = proc.Control[S]()
+    import de.sciss.lucre.expr.graph._
+    import de.sciss.lucre.expr.ExImport._
+    import de.sciss.synth.proc.ExImport._
+
+    //    c.graph() = proc.Control.Graph {
+    c.setGraph {
+      val r             = ThisRunner()
+      val dbFile        = "db-file".attr[AudioCue]
+      val queryRadioRec = Runner("query-radio-rec")
+
+      val SR            = 48000.0
+      val dbTargetLen   = (SR * 180).toLong
+      val maxCaptureLen = (SR *  12).toLong  // 20
+      val minCaptureLen = (SR *   4).toLong
+
+      val opt: Ex[Option[Act]] = dbFile.map { db0 =>
+        //        val db0     = dbFile
+        val len0    = db0.numFrames
+        val captLen = maxCaptureLen min (dbTargetLen - len0)
+        If (captLen < minCaptureLen) Then {
+          r.done // done /*txFutureSuccessful(len0)*/
+        } Else {
+          val captSec     = (captLen / SR) // .toFloat
+          // log(f"dbFill() - capture dur $captSec%g sec")
+          // val fFileApp = Artifact.
+//          val futFileApp: Ex[AudioCue] = ??? // client.queryRadioRec(captSec)
+          val recRun: Act = queryRadioRec.runWith(
+            "dur" -> captSec
+          )
+          val recDone = queryRadioRec.state.changed.filter(queryRadioRec.state sig_== 3)
+          recDone ---> r.done
+          recRun
+
+          //            futFileApp.flatMap { fileApp =>
+          //              val numFrames = min(fileApp.numFrames, captLen)
+          //              atomic { implicit tx =>
+          //                dbAppend(fileApp = fileApp.f, numFrames = numFrames).andThen {
+          //                  case _ => atomic { implicit tx => fileApp.release() }
+          //                }
+          //              }
+          //            }
+        }
+      }
+      opt.getOrElse(r.fail("no database"))
+    }
+
+    c
+  }
+
   def mkControlMain[S <: Sys[S]]()(implicit tx: S#Tx): proc.Control[S] = {
     val c = proc.Control[S]()
     import de.sciss.lucre.expr.graph._
+    import de.sciss.lucre.expr.ExImport._
+    import de.sciss.synth.proc.ExImport._
 
-    c.setGraph {
+//    c.setGraph {
+    c.graph() = proc.Control.Graph {
       // main entrance point to the installation
       LoadBang() ---> PrintLn("---- Writing (simultan) ----")
+
+      val dbFile = "db-file".attr[AudioCue]
+
+      val queryRadioRec = Runner("query-radio-rec")
+
+      /*
+
+      StopSelf()
+      DoneSelf()
+      FailSelf()
+      CompleteSelf(failure: Ex[String] = "")
+
+       */
+
+      def dbFill(done: Act): Act = {
+        val SR            = 48000.0
+        val dbTargetLen   = (SR * 180).toLong
+        val maxCaptureLen = (SR *  12).toLong  // 20
+        val minCaptureLen = (SR *   4).toLong
+
+        val opt: Ex[Option[Act]] = dbFile.map { db0 =>
+//        val db0     = dbFile
+          val len0    = db0.numFrames
+          val captLen = maxCaptureLen min (dbTargetLen - len0)
+          If (captLen < minCaptureLen) Then {
+            done /*txFutureSuccessful(len0)*/
+          } Else {
+            val captSec     = (captLen / SR) // .toFloat
+            // log(f"dbFill() - capture dur $captSec%g sec")
+            // val fFileApp = Artifact.
+//            val futFileApp: Ex[AudioCue] = ??? // client.queryRadioRec(captSec)
+            val recRun: Act = queryRadioRec.runWith(
+              "dur" -> captSec
+            )
+            val recDone = queryRadioRec.state.changed.filter(queryRadioRec.state sig_== 3)
+            recDone ---> done
+            recRun
+
+//            futFileApp.flatMap { fileApp =>
+//              val numFrames = min(fileApp.numFrames, captLen)
+//              atomic { implicit tx =>
+//                dbAppend(fileApp = fileApp.f, numFrames = numFrames).andThen {
+//                  case _ => atomic { implicit tx => fileApp.release() }
+//                }
+//              }
+//            }
+          }
+        }
+        opt.orNop
+      }
     }
     c
   }
