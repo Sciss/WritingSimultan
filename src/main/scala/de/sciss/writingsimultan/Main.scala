@@ -19,12 +19,18 @@ import de.sciss.lucre.stm.store.BerkeleyDB
 import de.sciss.synth.proc.{Durable, SoundProcesses, Workspace}
 
 object Main {
-  case class Config(ws: File)
+  case class Config(wsFile: File, audioBaseDir: File)
 
   type S = Durable
 
   def main(args: Array[String]): Unit = {
-    implicit val cf: Config = Config(file("/data/projects/WritingSimultan/writing-simultan.mllt"))
+    val projectDir    = file("/data/projects/WritingSimultan")
+    val wsFile        = projectDir / "writing-simultan.mllt"
+    val audioBaseDir  = projectDir / "audio_work"
+    implicit val cf: Config = Config(
+      wsFile        = wsFile,
+      audioBaseDir  = audioBaseDir
+    )
     run()
   }
 
@@ -32,10 +38,10 @@ object Main {
     SoundProcesses.init()
     FScape        .init()
 
-    val store = BerkeleyDB.factory(config.ws, createIfNecessary = true)
-    implicit val ws: Workspace[S] = Workspace.Durable.empty(config.ws, store)
+    val store = BerkeleyDB.factory(config.wsFile, createIfNecessary = true)
+    implicit val ws: Workspace[S] = Workspace.Durable.empty(config.wsFile, store)
     ws.cursor.step { implicit tx =>
-      Builder()
+      Builder(audioBaseDir = config.audioBaseDir)
     }
     ws.close()
     sys.exit()
