@@ -18,6 +18,7 @@ import de.sciss.fscape.lucre.FScape
 import de.sciss.fscape.lucre.MacroImplicits._
 import de.sciss.lucre.stm
 import de.sciss.lucre.artifact
+import de.sciss.lucre.expr.DoubleObj
 import de.sciss.lucre.synth.Sys
 import de.sciss.synth
 import de.sciss.synth.io.{AudioFileType, SampleFormat}
@@ -52,8 +53,10 @@ object Builder {
       val spec0 = synth.io.AudioFileSpec(AudioFileType.AIFF, SampleFormat.Float, numChannels = 1, sampleRate = 48000.0)
       tx.afterCommit {
         // create empty file
-        val af = synth.io.AudioFile.openWrite(dbFile0, spec0)
-        af.close()
+        if (!dbFile0.exists()) {
+          val af = synth.io.AudioFile.openWrite(dbFile0, spec0)
+          af.close()
+        }
       }
       proc.AudioCue.Obj[S](artDb, spec0, 0L, 1.0)
     }
@@ -78,6 +81,7 @@ object Builder {
       // test setup; let's just record from the line input
       val in  = PhysicalIn.ar
       val dur = "dur".ir // (1.0)
+      dur.poll(0, "query-radio-rec dur")
       DiskOut.ar("out", in)
       StopSelf(Done.kr(Line.ar(dur = dur)))
     }
@@ -91,6 +95,10 @@ object Builder {
     c.attr.put("query-radio-rec", pQueryRadioRec)
     c.attr.put("database" , cueDb)
     c.attr.put("temp-file", artTmp)
+    pQueryRadioRec.attr.put("out", artTmp)  // XXX TODO `runWith` not yet supported by Proc
+    mkObjIn(pQueryRadioRec, "dur", DEFAULT_VERSION) {
+      DoubleObj.newVar[S](0.0)
+    }
 
     import de.sciss.lucre.expr.ExImport._
     import de.sciss.lucre.expr.graph._
@@ -99,37 +107,46 @@ object Builder {
     c.setGraph {
       val r             = ThisRunner()
       val dbFile        = "database".attr[AudioCue]
-      val tmpFile       = Artifact("temp-file") // .attr[]
+      val tmpFile       = Artifact("query-radio-rec:out")
+      // val tmpFile       = Artifact("temp-file")
       val queryRadioRec = Runner("query-radio-rec")
+      val recDur        = "query-radio-rec:dur".attr(0.0)
 
       val SR            = 48000.0
       val dbTargetLen   = (SR * 180).toLong
       val maxCaptureLen = (SR *  12).toLong  // 20
       val minCaptureLen = (SR *   4).toLong
 
+      // 0 stopped, 1 prepare, 2 prepared, 3 run, 4 done, 5 fail
+      val recDone = (queryRadioRec.state sig_== 4).toTrig
+      val recFail = (queryRadioRec.state sig_== 5).toTrig
+      recDone ---> r.done
+      recFail ---> r.fail("query-radio-rec failed")
+
       val opt: Ex[Option[Act]] = for {
         db0  <- dbFile
       } yield {
-        //        val db0     = dbFile
         val len0    = db0.numFrames
         val captLen = maxCaptureLen min (dbTargetLen - len0)
         If (captLen < minCaptureLen) Then {
-          r.done // done /*txFutureSuccessful(len0)*/
+          r.done
         } Else {
           val captSec     = captLen / SR
           val ts          = TimeStamp()
           val tmpName     = ts.format("'rec_'yyMMdd'_'HHmmss'_'SSS'.irc'")
           val tmp1        = tmpFile.replaceName(tmpName)
           // log(f"dbFill() - capture dur $captSec%g sec")
-          // val fFileApp = Artifact.
-          // val futFileApp: Ex[AudioCue] = ??? // client.queryRadioRec(captSec)
-          val recRun: Act = queryRadioRec.runWith(
-            "dur" -> captSec,
-            "out" -> tmp1,
+          // XXX TODO `runWith` not yet supported by Proc
+          // val recRun: Act = queryRadioRec.runWith(
+          //   "dur" -> captSec,
+          //   "out" -> tmp1,
+          // )
+          val recRun: Act = queryRadioRec.run
+          Act(
+            tmpFile.set(tmp1),
+            recDur .set(captSec),
+            recRun,
           )
-          val recDone = (queryRadioRec.state sig_== 3).toTrig
-          recDone ---> r.done
-          recRun
 
           //            futFileApp.flatMap { fileApp =>
           //              val numFrames = min(fileApp.numFrames, captLen)
@@ -141,7 +158,10 @@ object Builder {
           //            }
         }
       }
-      opt.getOrElse(r.fail("no database"))
+      val actMain = opt.getOrElse(r.fail("no database"))
+      LoadBang() ---> actMain
+
+      queryRadioRec.state.changed ---> PrintLn(queryRadioRec.state.toStr)
     }
 
     c
