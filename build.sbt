@@ -6,8 +6,8 @@ lazy val projectVersion = "0.1.0-SNAPSHOT"
 lazy val deps = new {
   val main = new {
     val fscape          = "2.30.0"
-    val lucre           = "3.15.1-SNAPSHOT"
-    val soundProcesses  = "3.32.1-SNAPSHOT"
+    val lucre           = "3.15.1"
+    val soundProcesses  = "3.32.1"
   }
 }
 
@@ -19,8 +19,7 @@ lazy val commonSettings = Seq(
   homepage           := Some(url(s"https://git.iem.at/sciss/$baseName")),
   description        := "A sound installation",
   licenses           := Seq("AGPL v3+" -> url("http://www.gnu.org/licenses/agpl-3.0.txt")),
-  scalaVersion       := "2.12.10",
-  resolvers          += "Oracle Repository" at "http://download.oracle.com/maven",  // required for sleepycat
+  scalaVersion       := "2.13.1",
   scalacOptions     ++= Seq("-deprecation", "-unchecked", "-feature", "-encoding", "utf8", "-Xsource:2.13", "-Xlint:-stars-align,_"),
   scalacOptions     ++= {
     if (loggingEnabled || isSnapshot.value) Nil else Seq("-Xelide-below", "INFO")

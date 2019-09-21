@@ -18,4 +18,4 @@ Corresponding Research Catalogue page: https://www.researchcatalogue.net/view/66
 
 ## building
 
-All sub-projects build with sbt against Scala 2.12.
+All sub-projects build with sbt against Scala 2.13.
