@@ -14,11 +14,12 @@
 package de.sciss.writingsimultan
 
 import de.sciss.file._
+import de.sciss.fscape.GE
 import de.sciss.fscape.lucre.FScape
 import de.sciss.fscape.lucre.MacroImplicits._
 import de.sciss.lucre.stm
 import de.sciss.lucre.artifact
-import de.sciss.lucre.expr.DoubleObj
+import de.sciss.lucre.expr.{DoubleObj, IntObj}
 import de.sciss.lucre.synth.Sys
 import de.sciss.synth
 import de.sciss.synth.io.{AudioFileType, SampleFormat}
@@ -29,6 +30,8 @@ import de.sciss.writingsimultan.BuilderUtil._
 
 object Builder {
   val DEFAULT_VERSION = 1
+
+  protected def any2stringadd: Any = ()
 
   def apply[S <: Sys[S]](audioBaseDir: File)(implicit tx: S#Tx, workspace: Workspace[S]): Unit = {
     val dbDir     = audioBaseDir / "db"
@@ -61,9 +64,10 @@ object Builder {
       proc.AudioCue.Obj[S](artDb, spec0, 0L, 1.0)
     }
 
-    val pQueryRadioRec = mkObj[S, proc.Proc](fAux, "query-radio-rec", DEFAULT_VERSION)(mkProcQueryRadioRec[S]())
+    val pQueryRadioRec  = mkObj[S, proc.Proc](fAux, "query-radio-rec", DEFAULT_VERSION)(mkProcQueryRadioRec [S]())
+    val pAppendDb       = mkObj[S, FScape   ](fAux, "database-append", DEFAULT_VERSION)(mkFScAppendDb       [S]())
     mkObj[S, proc.Control](fAux, "fill-database", DEFAULT_VERSION) {
-      mkCtlFillDb(pQueryRadioRec = pQueryRadioRec, artTmp = artTmp, cueDb = cueDb)
+      mkCtlFillDb(pQueryRadioRec = pQueryRadioRec, pAppendDb = pAppendDb, artTmp = artTmp, cueDb = cueDb)
     }
     mkObj[S, proc.Control](r, "main", DEFAULT_VERSION)(mkControlMain())
   }
@@ -89,12 +93,79 @@ object Builder {
     p
   }
 
-  def mkCtlFillDb[S <: Sys[S]](pQueryRadioRec: stm.Obj[S], artTmp: artifact.Artifact[S], cueDb: proc.AudioCue.Obj[S])
+  def mkFScAppendDb[S <: Sys[S]]()(implicit tx: S#Tx): FScape[S] = {
+    val f = FScape[S]()
+
+    import de.sciss.fscape.graph.{AudioFileIn => _, AudioFileOut => _, _}
+    import de.sciss.fscape.lucre.graph.Ops._
+    import de.sciss.fscape.lucre.graph._
+
+    f.setGraph {
+      def mkInApp() = AudioFileIn("in-app")
+      def mkInDb()  = AudioFileIn("in-db")
+
+      val inDb        = AudioFileIn("in-db")
+      val inApp0      = mkInApp()
+      val captFrames  = "capt-frames".attr
+      val SR          = 48000.0
+
+      // Warning: there are still issues with using
+      // the same UGens in an If-Then-Els  and
+      // its corresponding predicate. The cheesy
+      // work around is to make sure we have independent
+      // expansion, thus using `def` here instead of `val`.
+      def numFrames   = captFrames min mkInApp().numFrames
+      def len0        = mkInDb().numFrames
+      def fdLen: GE   = len0 min (numFrames min (SR * 0.1).toInt) // .toInt
+
+      // adjust to target for 72 phons
+      val loudWin   = SR.toInt
+      val inAppSl   = Sliding(inApp0, size = loudWin, step = loudWin/2)
+      val loud      = Loudness(in = inAppSl, sampleRate = SR, size = loudWin)
+      //      val loudAvg = {
+      //        val sum = RunningSum(loud)
+      //        val num = Length(sum)
+      //        sum.last / num
+      //      }
+      val loudMax = {
+        RunningMax(loud).last
+      }
+      val loudCorr = {
+        val tgt   = 72.0
+        val dif   = tgt - loudMax
+        ((dif.abs.pow(0.85) * dif.signum) * 1.28).dbAmp.min(24)
+      }
+      val inApp   = (mkInApp() * loudCorr).clip2(1.0)
+
+      val cat: GE = If (fdLen.elastic(4) sig_== 0) Then {
+        //  DC(0).take(1).poll(0, "branch-1")
+        inDb ++ inApp
+      } Else {
+        //  DC(0).take(1).poll(0, "branch-2")
+        val preLen  = len0 - fdLen
+        val pre     = inDb.take(preLen)
+        val cross0  = inDb.drop(preLen) * Line(1, 0, fdLen).sqrt
+        val cross1  = inApp.take(fdLen ) * Line(0, 1, fdLen).sqrt
+        val cross   = (cross0 + cross1).clip2(1.0)
+        val post    = inApp.drop(fdLen)
+        pre ++ cross ++ post
+      }
+      // AudioFileSpec(AIFF, Int16, numChannels = 1, sampleRate = SR)
+      AudioFileOut("out-db" /*file = db1F*/, sampleRate = SR, in = cat)
+    }
+
+    f
+  }
+
+  def mkCtlFillDb[S <: Sys[S]](pQueryRadioRec: stm.Obj[S], pAppendDb: stm.Obj[S],
+                               artTmp: artifact.Artifact[S], cueDb: proc.AudioCue.Obj[S])
                               (implicit tx: S#Tx): proc.Control[S] = {
     val c = proc.Control[S]()
     c.attr.put("query-radio-rec", pQueryRadioRec)
-    c.attr.put("database" , cueDb)
-    c.attr.put("temp-file", artTmp)
+    c.attr.put("append-db"      , pAppendDb)
+    c.attr.put("database"       , cueDb)
+    c.attr.put("temp-file"      , artTmp)
+    c.attr.put("db-count", IntObj.newVar[S](0))
     pQueryRadioRec.attr.put("out", artTmp)  // XXX TODO `runWith` not yet supported by Proc
     mkObjIn(pQueryRadioRec, "dur", DEFAULT_VERSION) {
       DoubleObj.newVar[S](0.0)
@@ -105,63 +176,83 @@ object Builder {
     import de.sciss.synth.proc.ExImport._
 
     c.setGraph {
-      val r             = ThisRunner()
-      val dbFile        = "database".attr[AudioCue]
-      val tmpFile       = Artifact("query-radio-rec:out")
-      // val tmpFile       = Artifact("temp-file")
-      val queryRadioRec = Runner("query-radio-rec")
-      val recDur        = "query-radio-rec:dur".attr(0.0)
+      val r               = ThisRunner()
+      val dbCueIn         = "database".attr[AudioCue](AudioCue.Empty())
+      val recFile         = Artifact("query-radio-rec:out")
+      val rQueryRadioRec  = Runner("query-radio-rec")
+      val rAppendDb       = Runner("append-db")
+      val recDur          = "query-radio-rec:dur"   .attr(0.0)
+      val captFrames      = "append-db:capt-frames" .attr(0L)
 
-      val SR            = 48000.0
-      val dbTargetLen   = (SR * 180).toLong
-      val maxCaptureLen = (SR *  12).toLong  // 20
-      val minCaptureLen = (SR *   4).toLong
+      val SR              = 48000.0
+      val dbTargetLen     = (SR * 180).toLong
+      val maxCaptureLen   = (SR *  12).toLong  // 20
+      val minCaptureLen   = (SR *   4).toLong
 
       // 0 stopped, 1 prepare, 2 prepared, 3 run, 4 done, 5 fail
-      val recDone = (queryRadioRec.state sig_== 4).toTrig
-      val recFail = (queryRadioRec.state sig_== 5).toTrig
-      recDone ---> r.done
-      recFail ---> r.fail("query-radio-rec failed")
+      val recState        = rQueryRadioRec.state
+      val recDone         = ((recState sig_== 4) || (recState sig_== 0)).toTrig
+      val recFail         = (rQueryRadioRec.state sig_== 5).toTrig
 
-      val opt: Ex[Option[Act]] = for {
-        db0  <- dbFile
-      } yield {
-        val len0    = db0.numFrames
-        val captLen = maxCaptureLen min (dbTargetLen - len0)
+      val appendState     = rAppendDb.state
+      val appendDone      = ((appendState sig_== 4) || (appendState sig_== 0)).toTrig
+      val appendFail      = (rAppendDb.state sig_== 5).toTrig
+
+      val dbFileIn        = dbCueIn.artifact
+      val appendDbIn      = Artifact("append-db:in-db")
+      val appendDbOut     = Artifact("append-db:out-db")
+      val appendAppIn     = Artifact("append-db:in-app")
+      val dbCount         = "db-count".attr(0)
+      val dbCount1        = dbCount + (1: Ex[Int])
+      val dbFileOut       = dbFileIn.replaceName("db" ++ dbCount1.toStr ++ ".aif")
+
+      val actAppend = Act(
+        PrintLn("append rec"),
+        appendDbIn  .set(dbFileIn ),  // in-db
+        appendDbOut .set(dbFileOut),  // out-db
+        appendAppIn .set(recFile),    // in-app
+        rAppendDb.run
+      )
+
+      val actRec: Ex[Act] = {
+        val dbLen = dbCueIn.numFrames
+        val captLen: Ex[Long] = maxCaptureLen min (dbTargetLen - dbLen)
         If (captLen < minCaptureLen) Then {
-          r.done
+          actAppend // r.done
         } Else {
           val captSec     = captLen / SR
           val ts          = TimeStamp()
-          val tmpName     = ts.format("'rec_'yyMMdd'_'HHmmss'_'SSS'.irc'")
-          val tmp1        = tmpFile.replaceName(tmpName)
+          val recName     = ts.format("'rec_'yyMMdd'_'HHmmss'_'SSS'.irc'")
+          val recFileNew  = recFile.replaceName(recName)
           // log(f"dbFill() - capture dur $captSec%g sec")
           // XXX TODO `runWith` not yet supported by Proc
           // val recRun: Act = queryRadioRec.runWith(
           //   "dur" -> captSec,
-          //   "out" -> tmp1,
+          //   "out" -> recFileNew,
           // )
-          val recRun: Act = queryRadioRec.run
+          val recRun: Act = rQueryRadioRec.run
           Act(
-            tmpFile.set(tmp1),
-            recDur .set(captSec),
+            PrintLn("start rec"),
+            recFile   .set(recFileNew),
+            recDur    .set(captSec),
+            captFrames.set(captLen),
             recRun,
           )
-
-          //            futFileApp.flatMap { fileApp =>
-          //              val numFrames = min(fileApp.numFrames, captLen)
-          //              atomic { implicit tx =>
-          //                dbAppend(fileApp = fileApp.f, numFrames = numFrames).andThen {
-          //                  case _ => atomic { implicit tx => fileApp.release() }
-          //                }
-          //              }
-          //            }
         }
       }
-      val actMain = opt.getOrElse(r.fail("no database"))
-      LoadBang() ---> actMain
 
-      queryRadioRec.state.changed ---> PrintLn(queryRadioRec.state.toStr)
+      val actDone = Act(
+        dbCount.set(dbCount1),
+        r.done
+      )
+
+      LoadBang()  ---> actRec
+      recDone     ---> actAppend
+      recFail     ---> r.fail("query-radio-rec failed")
+      appendDone  ---> actDone
+      appendFail  ---> r.fail("database-append failed")
+
+      rQueryRadioRec.state.changed ---> PrintLn(rQueryRadioRec.state.toStr)
     }
 
     c
