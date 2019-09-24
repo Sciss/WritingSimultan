@@ -93,9 +93,10 @@ object Builder {
     p.setGraph {
       // test setup; let's just record from the line input
       val in  = PhysicalIn.ar
-      val dur = "dur".ir // (1.0)
+      val dur = "dur".ir
       dur.poll(0, "query-radio-rec dur")
       DiskOut.ar("out", in)
+      // XXX TODO --- there should be a DoneSelf
       StopSelf(Done.kr(Line.ar(dur = dur)))
     }
 
@@ -146,7 +147,7 @@ object Builder {
       }
       val inApp   = (mkInApp() * loudCorr).clip2(1.0)
 
-      val cat: GE = If (fdLen.elastic(4) sig_== 0) Then {
+      val cat: GE = If (fdLen /*.elastic(4)*/ sig_== 0) Then {
         //  DC(0).take(1).poll(0, "branch-1")
         inDb ++ inApp
       } Else {
@@ -210,6 +211,177 @@ object Builder {
     w
   }
 
+  def mkFScOverwriteSelect[S <: Sys[S]]()(implicit tx: S#Tx): FScape[S] = {
+    val f = FScape[S]()
+    import de.sciss.fscape.graph.{AudioFileIn => _, AudioFileOut => _, _}
+    import de.sciss.fscape.lucre.graph.Ops._
+    import de.sciss.fscape.lucre.graph._
+
+    f.setGraph {
+      val spaceDur = "space.dur".attr
+
+      def mkIn() = AudioFileIn("in")
+
+      val fileIn    = mkIn()
+      //      val specIn    = AudioFile.readSpec(fileIn)
+      //      import specIn.{numChannels, numFrames, sampleRate}
+      import fileIn.{numFrames, sampleRate}
+      // require(numChannels == 2) // left channel is sound signal, right channel is 'withering'
+
+      val in          = fileIn /*mkIn()*/ out 0
+      val inWither    = mkIn() out 1    // separate UGen so we don't run into trouble wrt to buffering
+
+      // XXX TODO --- enabling this prevents some hanging. but why?
+      // if (Main.showLog) {
+      in.poll(0, "ovr-fsc")
+      // }
+
+      val fftSize   : Int     = 1024 // 2048
+      val stepDiv   : Int     = 4
+      val numMel    : Int     = 42
+      val numCoef   : Int     = 21
+      val sideDur   : Double  = 0.25
+      val minFreq   : Double  = 100
+      val maxFreq   : Double  = 14000
+      val witherTgt : Double  = 0.0012 / 30   // a threshold of 0.0012 in 30 iterations
+      val WitheringConstant: Double = 0.0078125   // = 1.0/128
+
+      val stepSize    = fftSize / stepDiv
+      val sideFrames  = (sampleRate * sideDur ).floor // toInt
+      val spaceFrames = (sampleRate * spaceDur).floor // toInt
+      val spaceLen    = spaceFrames / stepSize
+      val sideLen     = (sideFrames / stepSize).max(1) // 24
+      val covSize     = numCoef * sideLen
+      val numSteps    = numFrames / stepSize
+      val numCov      = numSteps - (2 * sideLen)
+      val numCov1     = numSteps - sideLen - spaceLen
+
+      val lap         = Sliding (in       , fftSize, stepSize) * GenWindow(fftSize, GenWindow.Hann)
+      val fft         = Real1FFT(lap, fftSize, mode = 2)
+      val mag         = fft.complex.mag
+      val mel         = MelFilter(mag, fftSize/2, bands = numMel,
+        minFreq = minFreq, maxFreq = maxFreq, sampleRate = sampleRate)
+      val mfcc        = DCT_II(mel.log, numMel, numCoef, zero = 1 /* 0 */)
+
+      // reconstruction of what strugatzki's 'segmentation' is doing (first step)
+      val mfccSlid    = Sliding(mfcc, size = covSize, step = numCoef)
+      val mfccSlidT   = mfccSlid.drop(covSize)
+      val el          = BufferMemory(mfccSlid, size = covSize)
+      val cov         = Pearson(el, mfccSlidT, covSize)
+
+      val covNeg      = -cov + (1: GE)  // N.B. not `1 - cov` because binary-op-ugen stops when first input stops
+      val wither0     = ResizeWindow(inWither, size = stepSize, start = 0, stop = -(stepSize - 1))
+      val wither      = wither0 * (witherTgt / WitheringConstant)
+
+      val key         = (covNeg + wither).take(numCov1)
+      //    Length(BufferDisk(covNeg)).poll(0, "covNeg.length")
+      //    Length(BufferDisk(wither)).poll(0, "wither.length")
+      //    Length(BufferDisk(key   )).poll(0, "key   .length")
+
+      val covMin0     = DetectLocalMax(key, size = spaceLen)
+      val covMin      = covMin0.take(numCov)  // XXX TODO --- bug in DetectLocalMax?
+
+      val keysEl      = key.elastic()
+      val values      = Frames(keysEl) - 1
+      val keysG       = FilterSeq(keysEl, covMin)
+      val valuesG     = FilterSeq(values, covMin)
+
+      //    RunningMax(keysG).last.poll(0, "MAX SCHNUCK")
+
+      val top         = PriorityQueue(keysG, valuesG, size = 1)    // lowest covariances mapped to frames
+      val startF      = top * stepSize
+      val valuesGE    = BufferMemory(valuesG, numCov1)
+      val stopF       = (valuesG.dropWhile(valuesGE <= top) ++ numCov /* numSteps */).take(1) * stepSize
+
+      // def ValueOut(name: String, value: GE): Unit = ()
+      //
+      // ValueOut("start", startF)
+      // ValueOut("stop" , stopF )
+
+      MkLong("start", startF)
+      MkLong("stop" , stopF )
+
+      // SelectPart(startFrame = startF, stopFrame = stopF)
+    }
+    f
+  }
+
+  def mkCtlOverwrite[S <: Sys[S]](pQueryRadioRec: stm.Obj[S], pAppendDb: stm.Obj[S],
+                                  artTmp: artifact.Artifact[S], cueDb: proc.AudioCue.Obj[S],
+                                  dbCount: IntObj[S],
+                                 )
+                                 (implicit tx: S#Tx): proc.Control[S] = {
+    val c = proc.Control[S]()
+
+    import de.sciss.lucre.expr.ExImport._
+    import de.sciss.lucre.expr.graph._
+    import de.sciss.synth.proc.ExImport._
+
+    c.setGraph {
+      // ---- select ----
+
+      val ph0   = "phrase".attr[AudioCue](AudioCue.Empty())
+      val len0  = ph0.numFrames
+      val SR    = 48000.0
+
+      val minPhaseDur =   3.0
+      val maxPhaseDur =  30.0 // 150.0
+      val minStabDur  =  10.0
+      val minPhaseLen = (SR * minPhaseDur).toLong
+
+      val pDur = len0 / SR // framesToSeconds(len0)
+      // val mStretch = If (pDur <= minPhaseDur) Then {
+      //   stretchMotion.set(stretchGrow)
+      //   stretchGrow
+      //   ???
+      // } ElseIf (pDur >= maxPhaseDur) Then {
+      //   stretchMotion.set(stretchShrink)
+      //   stretchShrink
+      //   ???
+      // } ElseIf (pDur > minStabDur && random.nextDouble() < stableDurProb) Then {
+      //   stretchMotion.set(stretchStable)
+      //   stretchStable
+      //   ???
+      // } Else {
+      //   stretchMotion()
+      //   ???
+      // }
+      //
+      // val fStretch  = mStretch.step()
+      // val useBound  = random.nextDouble() <= ovrBoundaryProb
+      // val boundEnd  = useBound && random.nextDouble() > 0.667
+      // val jitAmt    = random.nextDouble()
+
+      // val spaceDur  = spaceDurMotion.step()
+      //
+      // val fut = If (len0 > minPhaseLen) Then {
+      //   SelectOverwrite(ph0.f, ctlCfg, spaceDur = spaceDur)
+      //   ???
+      // } Else {
+      //   txFutureSuccessful(Span(0L, 0L))
+      //   ???
+      // }
+
+      // fut.map { span0 =>
+      //   val span1       = if (!useBound) span0 else {
+      //     if (boundEnd) Span(len0 - span0.length, len0)
+      //     else          Span(0L, span0.length)
+      //   }
+      //   val span        = jitter(span1, r = jitAmt, secs = 0.2f, minStart = 0L, maxStop = len0)
+      //   val newLength0  = max(minPhInsLen, (span.length * fStretch + 0.5).toLong)
+      //   val newDiff0    = newLength0 - span.length
+      //   val len1        = max(minPhaseLen, min(maxPhaseLen, len0 + newDiff0))
+      //   val newDiff1    = len1 - len0
+      //   val newLength   = newDiff1 + span.length
+      //   val instr       = OverwriteInstruction(span, newLength = newLength)
+      //   log(f"phSelectOverwrite() yields $instr; fStretch $fStretch%g, spaceDur $spaceDur%g")
+      //   instr
+      // }
+    }
+
+    c
+  }
+
   def mkCtlFillDb[S <: Sys[S]](pQueryRadioRec: stm.Obj[S], pAppendDb: stm.Obj[S],
                                artTmp: artifact.Artifact[S], cueDb: proc.AudioCue.Obj[S],
                                dbCount: IntObj[S],
@@ -244,14 +416,10 @@ object Builder {
       val maxCaptureLen   = (SR *  12).toLong  // 20
       val minCaptureLen   = (SR *   4).toLong
 
-      // 0 stopped, 1 prepare, 2 prepared, 3 run, 4 done, 5 fail
-      val recState        = rQueryRadioRec.state
-      val recDone         = ((recState sig_== 4) || (recState sig_== 0)).toTrig
-      val recFail         = (rQueryRadioRec.state sig_== 5).toTrig
-
-      val appendState     = rAppendDb.state
-      val appendDone      = ((appendState sig_== 4) || (appendState sig_== 0)).toTrig
-      val appendFail      = (rAppendDb.state sig_== 5).toTrig
+      val recDone         = rQueryRadioRec.stoppedOrDone
+      val recFail         = rQueryRadioRec.failed
+      val appendDone      = rAppendDb     .stoppedOrDone
+      val appendFail      = rAppendDb     .failed
 
       val dbFileIn        = dbCueIn.artifact
       val appendDbIn      = Artifact("append-db:in-db")
