@@ -16,7 +16,7 @@ package de.sciss.writingsimultan
 import de.sciss.file._
 import de.sciss.fscape.lucre.FScape
 import de.sciss.lucre.stm.store.BerkeleyDB
-import de.sciss.synth.proc.{Durable, SoundProcesses, Workspace}
+import de.sciss.synth.proc.{Durable, SoundProcesses, Widget, Workspace}
 
 object Main {
   case class Config(wsFile: File, audioBaseDir: File)
@@ -37,6 +37,7 @@ object Main {
   def run()(implicit config: Config): Unit = {
     SoundProcesses.init()
     FScape        .init()
+    Widget        .init()
 
     val store = BerkeleyDB.factory(config.wsFile, createIfNecessary = true)
     implicit val ws: Workspace[S] = Workspace.Durable.empty(config.wsFile, store)

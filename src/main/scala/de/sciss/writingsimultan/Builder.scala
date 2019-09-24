@@ -19,7 +19,7 @@ import de.sciss.fscape.lucre.FScape
 import de.sciss.fscape.lucre.MacroImplicits._
 import de.sciss.lucre.stm
 import de.sciss.lucre.artifact
-import de.sciss.lucre.expr.{DoubleObj, IntObj}
+import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj}
 import de.sciss.lucre.synth.Sys
 import de.sciss.synth
 import de.sciss.synth.io.{AudioFileType, SampleFormat}
@@ -52,7 +52,7 @@ object Builder {
       artifact.Artifact[S](loc, tmpFile0)
     }
     val cueDb = mkObj[S, proc.AudioCue.Obj](fAux, "database", DEFAULT_VERSION) {
-      val artDb = artifact.Artifact[S](loc, dbFile0)
+//      val artDb = artifact.Artifact[S](loc, dbFile0)
       val spec0 = synth.io.AudioFileSpec(AudioFileType.AIFF, SampleFormat.Float, numChannels = 1, sampleRate = 48000.0)
       tx.afterCommit {
         // create empty file
@@ -61,15 +61,24 @@ object Builder {
           af.close()
         }
       }
-      proc.AudioCue.Obj[S](artDb, spec0, 0L, 1.0)
+//      proc.AudioCue.Obj[S](artDb, spec0, 0L, 1.0)
+      // N.B.: Obj.Bridge can only do in-place update with Expr.Var!
+      proc.AudioCue.Obj.newVar[S](
+        proc.AudioCue(
+          dbFile0 /*artDb*/, spec0, 0L, 1.0
+        )
+      )
     }
 
-    val pQueryRadioRec  = mkObj[S, proc.Proc](fAux, "query-radio-rec", DEFAULT_VERSION)(mkProcQueryRadioRec [S]())
-    val pAppendDb       = mkObj[S, FScape   ](fAux, "database-append", DEFAULT_VERSION)(mkFScAppendDb       [S]())
+    val dbCount         = mkObj[S, IntObj   ](fAux, "db-count"        , DEFAULT_VERSION)(IntObj.newVar[S](0))
+    val pQueryRadioRec  = mkObj[S, proc.Proc](fAux, "query-radio-rec" , DEFAULT_VERSION)(mkProcQueryRadioRec [S]())
+    val pAppendDb       = mkObj[S, FScape   ](fAux, "database-append" , DEFAULT_VERSION)(mkFScAppendDb       [S]())
     mkObj[S, proc.Control](fAux, "fill-database", DEFAULT_VERSION) {
-      mkCtlFillDb(pQueryRadioRec = pQueryRadioRec, pAppendDb = pAppendDb, artTmp = artTmp, cueDb = cueDb)
+      mkCtlFillDb(pQueryRadioRec = pQueryRadioRec, pAppendDb = pAppendDb, artTmp = artTmp, cueDb = cueDb,
+        dbCount = dbCount)
     }
-    mkObj[S, proc.Control](r, "main", DEFAULT_VERSION)(mkControlMain())
+    mkObj[S, proc.Control ](r, "main" , DEFAULT_VERSION)(mkControlMain())
+    mkObj[S, proc.Widget  ](r, "reset", DEFAULT_VERSION)(mkWgtReset(cueDb = cueDb, dbCount = dbCount))
   }
 
   protected def longWrapper: Any = ()
@@ -157,15 +166,61 @@ object Builder {
     f
   }
 
+  def mkWgtReset[S <: Sys[S]](
+                               cueDb: proc.AudioCue.Obj[S], dbCount: IntObj[S]
+                             )
+                             (implicit tx: S#Tx): proc.Widget[S] = {
+    val w = proc.Widget[S]()
+    w.attr.put("database" , cueDb)
+    w.attr.put("db-count" , dbCount)
+    w.attr.put("edit-mode" , BooleanObj.newVar(false))
+
+    import de.sciss.lucre.expr.ExImport._
+    import de.sciss.lucre.expr.graph._
+    import de.sciss.lucre.swing.graph._
+    import de.sciss.synth.proc.ExImport._
+
+    w.setGraph {
+      val dbCueIn   = "database".attr[AudioCue](AudioCue.Empty())
+      val dbCount   = "db-count".attr(0)
+      val bReset    = Bang()
+      val bInfo     = Bang()
+
+      val dbFileIn  = dbCueIn.artifact
+      val dbFileOut = dbFileIn.replaceName("db0.aif")
+      bReset ---> Act(
+        dbCount.set(0),
+        dbCueIn.set(AudioCue(dbFileOut, AudioFileSpec.Empty())),
+      )
+
+      bInfo ---> Act(
+        PrintLn("db-count = " ++ dbCount.toStr),
+        PrintLn("db-cue   = " ++ dbCueIn.toStr),
+      )
+
+      val p = GridPanel(
+        Label("Reset Database State:"),
+        bReset,
+        Label("Info:"),
+        bInfo,
+      )
+      p.columns = 2
+      p
+    }
+    w
+  }
+
   def mkCtlFillDb[S <: Sys[S]](pQueryRadioRec: stm.Obj[S], pAppendDb: stm.Obj[S],
-                               artTmp: artifact.Artifact[S], cueDb: proc.AudioCue.Obj[S])
+                               artTmp: artifact.Artifact[S], cueDb: proc.AudioCue.Obj[S],
+                               dbCount: IntObj[S],
+                              )
                               (implicit tx: S#Tx): proc.Control[S] = {
     val c = proc.Control[S]()
     c.attr.put("query-radio-rec", pQueryRadioRec)
     c.attr.put("append-db"      , pAppendDb)
     c.attr.put("database"       , cueDb)
     c.attr.put("temp-file"      , artTmp)
-    c.attr.put("db-count", IntObj.newVar[S](0))
+    c.attr.put("db-count", dbCount)
     pQueryRadioRec.attr.put("out", artTmp)  // XXX TODO `runWith` not yet supported by Proc
     mkObjIn(pQueryRadioRec, "dur", DEFAULT_VERSION) {
       DoubleObj.newVar[S](0.0)
@@ -203,7 +258,8 @@ object Builder {
       val appendDbOut     = Artifact("append-db:out-db")
       val appendAppIn     = Artifact("append-db:in-app")
       val dbCount         = "db-count".attr(0)
-      val dbCount1        = dbCount + (1: Ex[Int])
+      val loadBang        = LoadBang()
+      val dbCount1        = dbCount.latch(loadBang) + (1: Ex[Int])
       val dbFileOut       = dbFileIn.replaceName("db" ++ dbCount1.toStr ++ ".aif")
 
       val actAppend = Act(
@@ -241,12 +297,19 @@ object Builder {
         }
       }
 
+      val specDbOut = AudioFileSpec.read(dbFileOut)
+        .getOrElse(AudioFileSpec.Empty())
+      val dbCueOut  = AudioCue(dbFileOut, specDbOut)
+
       val actDone = Act(
+        PrintLn("append done."),
         dbCount.set(dbCount1),
+        dbCueIn.set(dbCueOut),
+        PrintLn(dbCueIn.toStr),
         r.done
       )
 
-      LoadBang()  ---> actRec
+      loadBang    ---> actRec
       recDone     ---> actAppend
       recFail     ---> r.fail("query-radio-rec failed")
       appendDone  ---> actDone
