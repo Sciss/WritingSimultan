@@ -35,11 +35,14 @@ object Builder {
 
   def apply[S <: Sys[S]](audioBaseDir: File)(implicit tx: S#Tx, workspace: Workspace[S]): Unit = {
     val dbDir     = audioBaseDir / "db"
+    val phDir     = audioBaseDir / "ph"
     val tmpDir    = audioBaseDir / "tmp"
     val dbFile0   = dbDir / "db0.aif"
+    val phFile0   = phDir / "ph0.aif"
     val tmpFile0  = tmpDir / "rec.irc"
     tx.afterCommit {
       dbDir .mkdirs()
+      phDir .mkdirs()
       tmpDir.mkdirs()
     }
 
@@ -73,10 +76,35 @@ object Builder {
     val dbCount         = mkObj[S, IntObj   ](fAux, "db-count"        , DEFAULT_VERSION)(IntObj.newVar[S](0))
     val pQueryRadioRec  = mkObj[S, proc.Proc](fAux, "query-radio-rec" , DEFAULT_VERSION)(mkProcQueryRadioRec [S]())
     val pAppendDb       = mkObj[S, FScape   ](fAux, "database-append" , DEFAULT_VERSION)(mkFScAppendDb       [S]())
-    mkObj[S, proc.Control](fAux, "fill-database", DEFAULT_VERSION) {
+    /*val pFillDb         =*/ mkObj[S, proc.Control](fAux, "fill-database", DEFAULT_VERSION) {
       mkCtlFillDb(pQueryRadioRec = pQueryRadioRec, pAppendDb = pAppendDb, artTmp = artTmp, cueDb = cueDb,
         dbCount = dbCount)
     }
+
+    val phCount         = mkObj[S, IntObj   ](fAux, "ph-count"        , DEFAULT_VERSION)(IntObj.newVar[S](0))
+    val cuePh = mkObj[S, proc.AudioCue.Obj](fAux, "phrase", DEFAULT_VERSION) {
+      val spec0 = synth.io.AudioFileSpec(AudioFileType.AIFF, SampleFormat.Float, numChannels = 1, sampleRate = 48000.0)
+      tx.afterCommit {
+        // create empty file
+        if (!phFile0.exists()) {
+          val af = synth.io.AudioFile.openWrite(phFile0, spec0)
+          af.close()
+        }
+      }
+      // N.B.: Obj.Bridge can only do in-place update with Expr.Var!
+      proc.AudioCue.Obj.newVar[S](
+        proc.AudioCue(
+          phFile0 /*artPh*/, spec0, 0L, 1.0
+        )
+      )
+    }
+
+    val pOverwriteSelect = mkObj[S, FScape](fAux, "overwrite-select" , DEFAULT_VERSION)(mkFScOverwriteSelect[S]())
+    /*val pOverwrite = */ mkObj[S, proc.Control](fAux, "overwrite", DEFAULT_VERSION) {
+      mkCtlOverwrite(pOverwriteSelect = pOverwriteSelect, cuePh = cuePh,
+        phCount = phCount)
+    }
+
     mkObj[S, proc.Control ](r, "main" , DEFAULT_VERSION)(mkControlMain())
     mkObj[S, proc.Widget  ](r, "reset", DEFAULT_VERSION)(mkWgtReset(cueDb = cueDb, dbCount = dbCount))
   }
@@ -218,7 +246,7 @@ object Builder {
     import de.sciss.fscape.lucre.graph._
 
     f.setGraph {
-      val spaceDur = "space.dur".attr
+      val spaceDur = "space-dur".attr
 
       def mkIn() = AudioFileIn("in")
 
@@ -253,8 +281,11 @@ object Builder {
       val sideLen     = (sideFrames / stepSize).max(1) // 24
       val covSize     = numCoef * sideLen
       val numSteps    = numFrames / stepSize
-      val numCov      = numSteps - (2 * sideLen)
-      val numCov1     = numSteps - sideLen - spaceLen
+      val numCov      = (numSteps - (2 * sideLen))      .max(0)
+      val numCov1     = (numSteps - sideLen - spaceLen) .max(0)
+
+      //numSteps.poll(0, "numSteps")
+      //numCov1.poll(0, "numCov1")
 
       val lap         = Sliding (in       , fftSize, stepSize) * GenWindow(fftSize, GenWindow.Hann)
       val fft         = Real1FFT(lap, fftSize, mode = 2)
@@ -276,7 +307,7 @@ object Builder {
       val key         = (covNeg + wither).take(numCov1)
       //    Length(BufferDisk(covNeg)).poll(0, "covNeg.length")
       //    Length(BufferDisk(wither)).poll(0, "wither.length")
-      //    Length(BufferDisk(key   )).poll(0, "key   .length")
+      //Length(BufferDisk(key   )).poll(0, "key   .length")
 
       val covMin0     = DetectLocalMax(key, size = spaceLen)
       val covMin      = covMin0.take(numCov)  // XXX TODO --- bug in DetectLocalMax?
@@ -289,9 +320,9 @@ object Builder {
       //    RunningMax(keysG).last.poll(0, "MAX SCHNUCK")
 
       val top         = PriorityQueue(keysG, valuesG, size = 1)    // lowest covariances mapped to frames
-      val startF      = top * stepSize
+      val startF      = (top * stepSize) ++ DC(0)
       val valuesGE    = BufferMemory(valuesG, numCov1)
-      val stopF       = (valuesG.dropWhile(valuesGE <= top) ++ numCov /* numSteps */).take(1) * stepSize
+      val stopF       = (valuesG.dropWhile(valuesGE <= top) ++ numCov /* numSteps */)/*.take(1) */ * stepSize
 
       // def ValueOut(name: String, value: GE): Unit = ()
       //
@@ -300,24 +331,24 @@ object Builder {
 
       MkLong("start", startF)
       MkLong("stop" , stopF )
-
-      // SelectPart(startFrame = startF, stopFrame = stopF)
     }
     f
   }
 
-  def mkCtlOverwrite[S <: Sys[S]](pQueryRadioRec: stm.Obj[S], pAppendDb: stm.Obj[S],
-                                  artTmp: artifact.Artifact[S], cueDb: proc.AudioCue.Obj[S],
-                                  dbCount: IntObj[S],
+  def mkCtlOverwrite[S <: Sys[S]](pOverwriteSelect: stm.Obj[S], cuePh: proc.AudioCue.Obj[S], phCount: IntObj[S],
                                  )
                                  (implicit tx: S#Tx): proc.Control[S] = {
     val c = proc.Control[S]()
+    c.attr.put("select"   , pOverwriteSelect)
+    c.attr.put("phrase"   , cuePh)
+    c.attr.put("ph-count" , phCount)
 
     import de.sciss.lucre.expr.ExImport._
     import de.sciss.lucre.expr.graph._
     import de.sciss.synth.proc.ExImport._
 
     c.setGraph {
+      val r               = ThisRunner()
       // ---- select ----
 
       val ph0   = "phrase".attr[AudioCue](AudioCue.Empty())
@@ -362,6 +393,53 @@ object Builder {
       //   ???
       // }
 
+      // val spaceDurMotion  : Motion = Motion.walk(1.2, 2.4, 0.1)
+
+      val spaceDur = (1.2 * 1.41) : Ex[Double] // XXX TODO
+      val spanStart0  = Var[Long]
+      val spanStop0   = Var[Long]
+
+      val rSelect = Runner("select")
+
+      val selectDone      = rSelect.stoppedOrDone
+      val selectFail      = rSelect.failed
+
+      val phCueIn         = "phrase".attr[AudioCue](AudioCue.Empty())
+
+      val phFileIn        = phCueIn.artifact
+      val phCount         = "ph-count".attr(0)
+      val loadBang        = LoadBang()
+      val phCount1        = phCount.latch(loadBang) + (1: Ex[Int])
+      val phFileOut       = phFileIn.replaceName("ph" ++ phCount1.toStr ++ ".aif")
+
+      val actSelect: Ex[Act] = {
+        val recRun: Act = rSelect.runWith(
+          "space-dur" -> spaceDur,
+          "in"        -> phFileIn,
+          "start"     -> spanStart0,
+          "stop"      -> spanStop0,
+        )
+
+        Act(
+          PrintLn("run select"),
+          recRun,
+        )
+      }
+
+      val actAdjust: Ex[Act] =
+        Act(
+          PrintLn("selected - start: " ++ spanStart0.toStr ++ " ; stop: " ++ spanStop0.toStr)
+        )
+
+      val actDone = Act(
+        PrintLn("overwrite done."),
+        r.done
+      )
+
+      loadBang    ---> actSelect
+      selectDone  ---> actAdjust
+      selectFail  ---> r.fail("overwrite-select failed")
+
       // fut.map { span0 =>
       //   val span1       = if (!useBound) span0 else {
       //     if (boundEnd) Span(len0 - span0.length, len0)
@@ -392,7 +470,7 @@ object Builder {
     c.attr.put("append-db"      , pAppendDb)
     c.attr.put("database"       , cueDb)
     c.attr.put("temp-file"      , artTmp)
-    c.attr.put("db-count", dbCount)
+    c.attr.put("db-count"       , dbCount)
     pQueryRadioRec.attr.put("out", artTmp)  // XXX TODO `runWith` not yet supported by Proc
     mkObjIn(pQueryRadioRec, "dur", DEFAULT_VERSION) {
       DoubleObj.newVar[S](0.0)
@@ -456,7 +534,7 @@ object Builder {
           // )
           val recRun: Act = rQueryRadioRec.run
           Act(
-            PrintLn("start rec"),
+            PrintLn("run rec"),
             recFile   .set(recFileNew),
             recDur    .set(captSec),
             captFrames.set(captLen),
