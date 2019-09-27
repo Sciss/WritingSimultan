@@ -54,6 +54,10 @@ object Builder {
     val artTmp = mkObj[S, artifact.Artifact](fAux, "rec", DEFAULT_VERSION) {
       artifact.Artifact[S](loc, tmpFile0)
     }
+
+    val dbCount         = mkObj[S, IntObj   ](fAux, "db-count"        , DEFAULT_VERSION)(IntObj.newVar[S](0))
+    val phCount         = mkObj[S, IntObj   ](fAux, "ph-count"        , DEFAULT_VERSION)(IntObj.newVar[S](0))
+
     val cueDb = mkObj[S, proc.AudioCue.Obj](fAux, "database", DEFAULT_VERSION) {
 //      val artDb = artifact.Artifact[S](loc, dbFile0)
       val spec0 = synth.io.AudioFileSpec(AudioFileType.AIFF, SampleFormat.Float, numChannels = 1, sampleRate = 48000.0)
@@ -73,15 +77,6 @@ object Builder {
       )
     }
 
-    val dbCount         = mkObj[S, IntObj   ](fAux, "db-count"        , DEFAULT_VERSION)(IntObj.newVar[S](0))
-    val pQueryRadioRec  = mkObj[S, proc.Proc](fAux, "query-radio-rec" , DEFAULT_VERSION)(mkProcQueryRadioRec [S]())
-    val pAppendDb       = mkObj[S, FScape   ](fAux, "database-append" , DEFAULT_VERSION)(mkFScAppendDb       [S]())
-    val pFillDb         = mkObj[S, proc.Control](fAux, "fill-database", DEFAULT_VERSION) {
-      mkCtlFillDb(pQueryRadioRec = pQueryRadioRec, pAppendDb = pAppendDb, artTmp = artTmp, cueDb = cueDb,
-        dbCount = dbCount)
-    }
-
-    val phCount         = mkObj[S, IntObj   ](fAux, "ph-count"        , DEFAULT_VERSION)(IntObj.newVar[S](0))
     val cuePh = mkObj[S, proc.AudioCue.Obj](fAux, "phrase", DEFAULT_VERSION) {
       val spec0 = synth.io.AudioFileSpec(AudioFileType.AIFF, SampleFormat.Float, numChannels = 1, sampleRate = 48000.0)
       tx.afterCommit {
@@ -97,6 +92,13 @@ object Builder {
           phFile0 /*artPh*/, spec0, 0L, 1.0
         )
       )
+    }
+
+    val pQueryRadioRec  = mkObj[S, proc.Proc](fAux, "query-radio-rec" , DEFAULT_VERSION)(mkProcQueryRadioRec [S]())
+    val pAppendDb       = mkObj[S, FScape   ](fAux, "database-append" , DEFAULT_VERSION)(mkFScAppendDb       [S]())
+    val pFillDb         = mkObj[S, proc.Control](fAux, "fill-database", DEFAULT_VERSION) {
+      mkCtlFillDb(pQueryRadioRec = pQueryRadioRec, pAppendDb = pAppendDb, artTmp = artTmp, cueDb = cueDb,
+        dbCount = dbCount)
     }
 
     val fscOvrSelect = mkObj[S, FScape](fAux, "overwrite-select-fsc" , DEFAULT_VERSION)(mkFScOverwriteSelect[S]())
@@ -115,6 +117,11 @@ object Builder {
     val fscOvrPerform = mkObj[S, FScape](fAux, "overwrite-perform" , DEFAULT_VERSION)(
       mkFScOvrPerform[S]()
     )
+
+    val pProcPlay = mkObj[S, proc.Proc](fAux, "play-phrase-proc", DEFAULT_VERSION)(mkProcPlayPhrase[S]())
+    /*val pCtlPlay =*/ mkObj[S, proc.Control](fAux, "play-phrase", DEFAULT_VERSION) {
+      mkCtlPlayPhrase(procPlay = pProcPlay, cuePh = cuePh)
+    }
 
     mkObj[S, proc.Control ](r, "main"     , DEFAULT_VERSION)(mkCtlMain())
     mkObj[S, proc.Control ](r, "iterate"  , DEFAULT_VERSION)(
@@ -378,6 +385,103 @@ object Builder {
     }
     f
   }
+  def mkCtlPlayPhrase[S <: Sys[S]](procPlay: proc.Proc[S],
+                                    cuePh: proc.AudioCue.Obj[S],
+                                  )
+                                  (implicit tx: S#Tx): proc.Control[S] = {
+    val c = proc.Control[S]()
+    c.attr.put("play"   , procPlay)
+    c.attr.put("phrase" , cuePh)
+
+    import de.sciss.lucre.expr.ExImport._
+    import de.sciss.lucre.expr.graph._
+    import de.sciss.synth.proc.ExImport._
+
+    /*
+  def play()(implicit tx: Txn): Double = {
+    import TxnLike.peer
+
+    val ph0 = phFile()
+    if (ph0.numFrames > 4800) {
+      val fadeIn  = 0.1f
+      import numbers.Implicits._
+      val fadeOut = random.nextFloat().linLin(0, 1, 0.1f, 0.5f)
+      val start   = 0L
+      val stop    = ph0.numFrames
+      client.scene.play(ph0, ch = channel, start = start, stop = stop, fadeIn = fadeIn, fadeOut = fadeOut)
+      ph0.numFrames / SR
+    } else {
+      0.0
+    }
+  }
+       */
+
+    c.setGraph {
+      val r         = ThisRunner()
+      val rPlay     = Runner("play")
+      val phCue     = "phrase"  .attr[AudioCue](AudioCue.Empty())
+      //val artPh     = Artifact("play:in"  )
+      val aIn       = "play:in".attr[AudioCue]
+      val phFile    = phCue.artifact
+      val fadeIn    = 0.1
+      val fadeOut   = 0.25 // XXX TODO: random.nextFloat().linLin(0, 1, 0.1f, 0.5f)
+      val aFdIn     = "play:fade-in"  .attr[Double]
+      val aFdOut    = "play:fade-out" .attr[Double]
+      val aDur      = "play:dur"      .attr[Double]
+      val phDur     = phCue.numFrames / phCue.sampleRate
+      val actPlay = Act(
+        //  artPh .set(phFile),
+        aIn   .set(phCue),
+        aFdIn .set(fadeIn),    // XXX TODO --- runWith not yet supported
+        aFdOut.set(fadeOut),
+        aDur  .set(phDur),
+        rPlay.run,
+      )
+
+      val init      = LoadBang()
+      init ---> actPlay
+
+      rPlay.stoppedOrDone ---> Act(
+        PrintLn("phrase play done."),
+        r.done,
+      )
+
+      rPlay.failed ---> Act(
+        PrintLn("phrase play failed."),
+        r.fail(rPlay.messages.mkString("\n"))
+      )
+    }
+
+    c
+  }
+
+  def mkProcPlayPhrase[S <: Sys[S]]()(implicit tx: S#Tx): proc.Proc[S] = {
+    val p = proc.Proc[S]()
+
+    import de.sciss.synth.proc.graph.Ops.stringToControl
+    import de.sciss.synth.proc.graph._
+    import de.sciss.synth.ugen.{DiskOut => _, VDiskIn => _, _}
+    import de.sciss.synth.Curve
+
+    p.setGraph {
+      val bus     = "bus"     .ir(0.0)
+      val dur     = "dur"     .ir
+      val fdIn    = "fade-in" .ir
+      val fdOut   = "fade-out".ir
+      val disk    = VDiskIn.ar("in", loop = 0) // numChannels = 2, buf = buf, speed = BufRateScale.ir(buf), loop = 0)
+      val chan    = disk out 0 // if (numChannels == 1) disk else Select.ar(bus, disk)
+      val hpf     = HPF.ar(chan, 80.0)
+      val env     = Env.linen(attack = fdIn, sustain = dur - (fdIn + fdOut), release = fdOut, curve = Curve.sine)
+      val amp     = "amp".kr(1.0)
+      val eg      = EnvGen.ar(env, levelScale = amp /* , doneAction = freeSelf */)
+      val done    = Done.kr(eg)
+      val sig     = hpf * eg
+      Out.ar(bus, sig)
+      StopSelf(done)
+    }
+
+    p
+  }
 
   def mkCtlIterate[S <: Sys[S]](pFillDb     : stm.Obj[S],
                                 pOvrSelect  : stm.Obj[S],
@@ -620,7 +724,7 @@ object Builder {
       val maxFreq     = 14000.0
       // limit, because the Pi is too slow to run the
       // entire 3 minutes in one rotation
-      val maxDbDur    = 42.0
+      val maxDbDur    = 72.0 // 42.0
       val maxDbLen    = (maxDbDur * SR).toLong
 
       val stepSize    = fftSize / stepDiv
@@ -794,7 +898,7 @@ object Builder {
       // val stretchStable   : Motion = Motion.linexp(Motion.walk(0, 1, 0.1), 0, 1, 1.0 / 1.1, 1.1)
       // val stretchGrow     : Motion = Motion.walk(1.2, 2.0, 0.2)
       // val stretchShrink   : Motion = Motion.walk(0.6, 0.95, 0.2)
-      val fStretch = 1.0 : Ex[Double] // XXX TODO
+      val fStretch = 1.1 /*1.0*/ : Ex[Double] // XXX TODO
 
       val useBound = false  : Ex[Boolean] // XXX TODO
       val boundEnd = false  : Ex[Boolean] // XXX TODO
