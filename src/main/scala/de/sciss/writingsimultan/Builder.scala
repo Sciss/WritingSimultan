@@ -985,7 +985,7 @@ object Builder {
       appendDone  ---> actDone
       appendFail  ---> r.fail("database-append failed")
 
-      rQueryRadioRec.state.changed ---> PrintLn(rQueryRadioRec.state.toStr)
+      // rQueryRadioRec.state.changed ---> PrintLn(rQueryRadioRec.state.toStr)
     }
 
     c
