@@ -210,7 +210,7 @@ object Builder {
         //  DC(0).take(1).poll(0, "branch-2")
         val preLen  = len0 - fdLen
         val pre     = inDb.take(preLen)
-        val cross0  = inDb.drop(preLen) * Line(1, 0, fdLen).sqrt
+        val cross0  = inDb.drop(preLen)  * Line(1, 0, fdLen).sqrt
         val cross1  = inApp.take(fdLen ) * Line(0, 1, fdLen).sqrt
         val cross   = (cross0 + cross1).clip2(1.0)
         val post    = inApp.drop(fdLen)
@@ -552,13 +552,15 @@ object Builder {
       } Else {
         val insFdLen = mkInsFdLen
         // we could use .sqrt for left channel and linear for right channel;
-        // for simplicity, just use linear for both
-        val preOut  = inPh.drop(phPos).take(insFdLen) * Line(1, 0, insFdLen) // .sqrt
-        val midIn   = insMid          .take(insFdLen) * Line(0, 1, insFdLen) // .sqrt
+        // for simplicity, just use linear for both.
+        // NOTE: we do not fade in/out the withering channel, because that
+        // would build up stuff at the phrase beginning and end!
+        val preOut  = inPh.drop(phPos).take(insFdLen) * Line(Seq[GE](1.0, 0.0), 0.0, insFdLen) // .sqrt
+        val midIn   = insMid          .take(insFdLen) * Line(Seq[GE](0.0, 1.0), 1.0, insFdLen) // .sqrt
         val cross0  = preOut + midIn
         val cross1  = insMid.drop(insFdLen).take(spliceLen - 2*insFdLen)
-        val midOut  = insMid.drop(spliceLen     - insFdLen)                * Line(1, 0, insFdLen) // .sqrt
-        val postIn  = inPh  .drop(instrSpanStop - insFdLen).take(insFdLen) * Line(0, 1, insFdLen) // .sqrt
+        val midOut  = insMid.drop(spliceLen     - insFdLen)                * Line(1.0, Seq[GE](0.0, 1.0), insFdLen) // .sqrt
+        val postIn  = inPh  .drop(instrSpanStop - insFdLen).take(insFdLen) * Line(0.0, Seq[GE](1.0, 0.0), insFdLen) // .sqrt
         val cross2  = midOut + postIn
         val cross   = cross0 ++ cross1 ++ cross2
 
@@ -604,7 +606,7 @@ object Builder {
         val in = AudioFileIn("phrase") // (phFile, numChannels = phSpec.numChannels)
         // there is a bloody bug in fscape audio-file-in with the second channel dangling.
         // this seems to fix it. XXX TODO --- is this still the case?
-        Length(in).poll(0, "length-ph-in")
+        // Length(in).poll(0, "length-ph-in")
         in out 0
       }
 
@@ -944,7 +946,9 @@ object Builder {
         val dbLen = dbCueIn.numFrames
         val captLen: Ex[Long] = maxCaptureLen min (dbTargetLen - dbLen)
         If (captLen < minCaptureLen) Then {
-          actAppend // r.done
+          Act(
+            PrintLn("(db long enough)"), r.done   // actAppend
+          )
         } Else {
           val captSec     = captLen / SR
           val ts          = TimeStamp()
