@@ -8,6 +8,7 @@ lazy val deps = new {
     val fscape          = "2.31.0-SNAPSHOT"
     val lucre           = "3.15.2-SNAPSHOT"
     val soundProcesses  = "3.32.2-SNAPSHOT"
+    val span            = "1.4.3"
   }
 }
 
@@ -36,6 +37,7 @@ lazy val root = project.withId(baseNameL).in(file("."))
     libraryDependencies ++= Seq(
       "de.sciss"  %% "soundprocesses" % deps.main.soundProcesses,
       "de.sciss"  %% "fscape-macros"  % deps.main.fscape,
+      "de.sciss"  %% "span"           % deps.main.span,
       "de.sciss"  %% "lucre-expr"     % deps.main.lucre,
       "de.sciss"  %% "lucre-bdb"      % deps.main.lucre,
     ),
