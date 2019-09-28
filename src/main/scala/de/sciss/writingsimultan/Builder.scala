@@ -51,9 +51,10 @@ object Builder {
     val loc           = mkObj[S, artifact.ArtifactLocation](fAux, "base", DEFAULT_VERSION) {
       artifact.ArtifactLocation.newVar[S](audioBaseDir)
     }
-    val artTmp = mkObj[S, artifact.Artifact](fAux, "rec", DEFAULT_VERSION) {
-      artifact.Artifact[S](loc, tmpFile0)
-    }
+
+//    val artTmp = mkObj[S, artifact.Artifact](fAux, "rec", DEFAULT_VERSION) {
+//      artifact.Artifact[S](loc, tmpFile0)
+//    }
 
     val dbCount         = mkObj[S, IntObj   ](fAux, "db-count"        , DEFAULT_VERSION)(IntObj.newVar[S](0))
     val phCount         = mkObj[S, IntObj   ](fAux, "ph-count"        , DEFAULT_VERSION)(IntObj.newVar[S](0))
@@ -94,11 +95,25 @@ object Builder {
       )
     }
 
+    val cueTmp = mkObj[S, proc.AudioCue.Obj](fAux, "tmp-file", DEFAULT_VERSION) {
+      val spec0 = synth.io.AudioFileSpec(AudioFileType.IRCAM, SampleFormat.Float, numChannels = 1, sampleRate = 48000.0)
+      proc.AudioCue.Obj.newVar[S](
+        proc.AudioCue(
+          tmpFile0 /*artPh*/, spec0, 0L, 1.0
+        )
+      )
+    }
+
     val pQueryRadioRec  = mkObj[S, proc.Proc](fAux, "query-radio-rec" , DEFAULT_VERSION)(mkProcQueryRadioRec [S]())
     val pAppendDb       = mkObj[S, FScape   ](fAux, "database-append" , DEFAULT_VERSION)(mkFScAppendDb       [S]())
     val pFillDb         = mkObj[S, proc.Control](fAux, "fill-database", DEFAULT_VERSION) {
-      mkCtlFillDb(pQueryRadioRec = pQueryRadioRec, pAppendDb = pAppendDb, artTmp = artTmp, cueDb = cueDb,
-        dbCount = dbCount)
+      mkCtlFillDb(
+        pQueryRadioRec  = pQueryRadioRec,
+        pAppendDb       = pAppendDb,
+        cueTmp          = cueTmp,
+        cueDb           = cueDb,
+        dbCount         = dbCount,
+      )
     }
 
     val fscOvrSelect = mkObj[S, FScape](fAux, "overwrite-select-fsc" , DEFAULT_VERSION)(mkFScOverwriteSelect[S]())
@@ -151,7 +166,7 @@ object Builder {
       locBase = loc,
       cueDb   = cueDb,
       cuePh   = cuePh,
-      artTmp  = artTmp,
+      cueTmp  = cueTmp,
       dbCount = dbCount,
       phCount = phCount,
     ))
@@ -357,7 +372,11 @@ object Builder {
         |receive a sound signal from any other real-time source.
         |
         |The workspace itself contains a small 'control' user interface that you
-        |can open. The main search and replace algorithm is activated with the
+        |can open. But before, the location of the sound file directory has to be
+        |set using the 'initialize' UI. Open that, select a directory, and press
+        |'Initialize', then you can close that window.
+        |
+        |In 'control', the main search and replace algorithm is activated with the
         |'Render Loop' checkbox. Once you click that, you should see messages
         |appearing in the post window. Initially your database and phrase files
         |will be empty, so it will take a while, until the database has been
@@ -1188,17 +1207,20 @@ object Builder {
     c
   }
 
-  def mkCtlFillDb[S <: Sys[S]](pQueryRadioRec: stm.Obj[S], pAppendDb: stm.Obj[S],
-                               artTmp: artifact.Artifact[S], cueDb: proc.AudioCue.Obj[S],
-                               dbCount: IntObj[S],
+  def mkCtlFillDb[S <: Sys[S]](
+                                pQueryRadioRec: stm.Obj[S],
+                                pAppendDb     : stm.Obj[S],
+                                cueDb         : proc.AudioCue.Obj[S],
+                                cueTmp        : proc.AudioCue.Obj[S],
+                                dbCount       : IntObj[S],
                               )
                               (implicit tx: S#Tx): proc.Control[S] = {
     val c = proc.Control[S]()
     c.attr.put("query-radio-rec", pQueryRadioRec)
     c.attr.put("append-db"      , pAppendDb)
     c.attr.put("database"       , cueDb)
+    c.attr.put("tmp-file"       , cueTmp)
     c.attr.put("db-count"       , dbCount)
-    pQueryRadioRec.attr.put("out", artTmp)  // XXX TODO `runWith` not yet supported by Proc
     mkObjIn(pQueryRadioRec, "dur", DEFAULT_VERSION) {
       DoubleObj.newVar[S](0.0)
     }
@@ -1210,7 +1232,8 @@ object Builder {
     c.setGraph {
       val r               = ThisRunner()
       val dbCueIn         = "database".attr[AudioCue](AudioCue.Empty())
-      val recFile         = Artifact("query-radio-rec:out")
+      val recCueIn        = "tmp-file".attr[AudioCue](AudioCue.Empty())
+      val recOut          = Artifact("query-radio-rec:out")
       val rQueryRadioRec  = Runner("query-radio-rec")
       val rAppendDb       = Runner("append-db")
       val recDur          = "query-radio-rec:dur"   .attr(0.0)
@@ -1234,12 +1257,13 @@ object Builder {
       val loadBang        = LoadBang()
       val dbCount1        = dbCount.latch(loadBang) + (1: Ex[Int])
       val dbFileOut       = dbFileIn.replaceName("db" ++ dbCount1.toStr ++ ".aif")
+      val recFileIn       = recCueIn.artifact
 
       val actAppend = Act(
         PrintLn("append rec"),
         appendDbIn  .set(dbFileIn ),  // in-db
         appendDbOut .set(dbFileOut),  // out-db
-        appendAppIn .set(recFile),    // in-app
+        appendAppIn .set(recOut   ),  // in-app
         rAppendDb.run
       )
 
@@ -1254,7 +1278,7 @@ object Builder {
           val captSec     = captLen / SR
           val ts          = TimeStamp()
           val recName     = ts.format("'rec_'yyMMdd'_'HHmmss'_'SSS'.irc'")
-          val recFileNew  = recFile.replaceName(recName)
+          val recFileOut  = recFileIn.replaceName(recName)
           // log(f"dbFill() - capture dur $captSec%g sec")
           // XXX TODO `runWith` not yet supported by Proc
           // val recRun: Act = queryRadioRec.runWith(
@@ -1264,7 +1288,7 @@ object Builder {
           val recRun: Act = rQueryRadioRec.run
           Act(
             PrintLn("run rec"),
-            recFile   .set(recFileNew),
+            recOut    .set(recFileOut),
             recDur    .set(captSec),
             captFrames.set(captLen),
             recRun,
@@ -1304,8 +1328,9 @@ object Builder {
     f.setGraph {
       val SR  = 48000.0
       val sig = 0.0: GE // somehow can't write an empty file
-      AudioFileOut("out-db", sampleRate = SR, in = sig)
-      AudioFileOut("out-ph", sampleRate = SR, in = sig)
+      AudioFileOut("out-db"   , sampleRate = SR, in = sig)
+      AudioFileOut("out-ph"   , sampleRate = SR, in = sig)
+      AudioFileOut("tmp-file" , sampleRate = SR, in = sig)
     }
     f
   }
@@ -1315,7 +1340,7 @@ object Builder {
                                     locBase: artifact.ArtifactLocation[S],
                                     cueDb: proc.AudioCue.Obj[S],
                                     cuePh: proc.AudioCue.Obj[S],
-                                    artTmp: artifact.Artifact[S],
+                                    cueTmp: proc.AudioCue.Obj[S],
                                     dbCount    : IntObj[S],
                                     phCount    : IntObj[S],
                                   )(implicit tx: S#Tx): proc.Widget[S] = {
@@ -1324,8 +1349,8 @@ object Builder {
     w.attr.put("init-fsc" , fscInit)
     w.attr.put("database" , cueDb)
     w.attr.put("phrase"   , cuePh)
+    w.attr.put("tmp-file" , cueTmp)
     w.attr.put("base"     , locBase)
-    w.attr.put("tmp-file" , artTmp)
     w.attr.put("db-count" , dbCount)
     w.attr.put("ph-count" , phCount)
 
@@ -1342,9 +1367,10 @@ object Builder {
       val rFSc    = Runner("init-fsc")
       val aDb0    = Artifact("init-fsc:out-db" )
       val aPh0    = Artifact("init-fsc:out-ph" )
-      val recFile = Artifact("tmp-file")
+      val aRec0   = Artifact("init-fsc:tmp-file")
       val dbCueIn = "database".attr[AudioCue](AudioCue.Empty())
       val phCueIn = "phrase"  .attr[AudioCue](AudioCue.Empty())
+      val recCueIn= "tmp-file".attr[AudioCue](AudioCue.Empty())
       val dbCount = "db-count".attr(0)
       val phCount = "ph-count".attr(0)
 
@@ -1370,19 +1396,21 @@ object Builder {
 
       val ggInit = Button("Initialize")
       ggInit.clicked ---> Act(
-        dbDir.mkDir,
-        phDir.mkDir,
+        dbDir .mkDir,
+        phDir .mkDir,
         tmpDir.mkDir,
-        aDb0.set(dbDir / "db0.aif"),
-        aPh0.set(phDir / "ph0.aif"),
+        aDb0  .set(dbDir  / "db0.aif"),
+        aPh0  .set(phDir  / "ph0.aif"),
+        aRec0 .set(tmpDir / "rec.irc"),
         rFSc.run
       )
 
       rFSc.failed ---> PrintLn(rFSc.messages.mkString("Init failed: ", "\n", ""))
       rFSc.done ---> Act(
-        dbCueIn.set(AudioCue(aDb0, AudioFileSpec.Read(aDb0).getOrElse(AudioFileSpec.Empty()))),
-        phCueIn.set(AudioCue(aPh0, AudioFileSpec.Read(aPh0).getOrElse(AudioFileSpec.Empty()))),
-        recFile.set(tmpDir / "rec.irc"),
+        dbCueIn .set(AudioCue(aDb0  , AudioFileSpec.Read(aDb0 ).getOrElse(AudioFileSpec.Empty()))),
+        phCueIn .set(AudioCue(aPh0  , AudioFileSpec.Read(aPh0 ).getOrElse(AudioFileSpec.Empty()))),
+        recCueIn.set(AudioCue(aRec0 , AudioFileSpec.Read(aRec0).getOrElse(AudioFileSpec.Empty()))),
+//        aRec0.set(tmpDir / "rec.irc"),
         dbCount.set(0),
         phCount.set(0),
         PrintLn("Initialized.")
