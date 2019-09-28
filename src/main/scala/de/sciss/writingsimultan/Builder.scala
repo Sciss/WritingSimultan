@@ -17,9 +17,8 @@ import de.sciss.file._
 import de.sciss.fscape.GE
 import de.sciss.fscape.lucre.FScape
 import de.sciss.fscape.lucre.MacroImplicits._
-import de.sciss.lucre.stm
-import de.sciss.lucre.artifact
 import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj}
+import de.sciss.lucre.{artifact, stm}
 import de.sciss.lucre.synth.Sys
 import de.sciss.synth
 import de.sciss.synth.io.{AudioFileType, SampleFormat}
@@ -119,13 +118,13 @@ object Builder {
     )
 
     val pProcPlay = mkObj[S, proc.Proc](fAux, "play-phrase-proc", DEFAULT_VERSION)(mkProcPlayPhrase[S]())
-    /*val pCtlPlay =*/ mkObj[S, proc.Control](fAux, "play-phrase", DEFAULT_VERSION) {
+
+    val pCtlPlay = mkObj[S, proc.Control](fAux, "play-phrase", DEFAULT_VERSION) {
       mkCtlPlayPhrase(procPlay = pProcPlay, cuePh = cuePh)
     }
 
-    mkObj[S, proc.Control ](r, "main"     , DEFAULT_VERSION)(mkCtlMain())
-    mkObj[S, proc.Control ](r, "iterate"  , DEFAULT_VERSION)(
-      mkCtlIterate(
+    val pRender = mkObj[S, proc.Control ](fAux, "render", DEFAULT_VERSION)(
+      mkCtlRender(
         pFillDb       = pFillDb,
         pOvrSelect    = pOvrSelect,
         pMatchSelect  = fscMatchSelect,
@@ -136,7 +135,20 @@ object Builder {
         phCount       = phCount,
       )
     )
-    mkObj[S, proc.Widget  ](r, "reset"    , DEFAULT_VERSION)(mkWgtReset(
+
+    val pRenderLoop = mkObj[S, proc.Control](fAux, "render-loop", DEFAULT_VERSION)(mkCtlLoopRun(pRender ))
+    val pPlayLoop   = mkObj[S, proc.Control](fAux, "play-loop"  , DEFAULT_VERSION)(mkCtlLoopRun(pCtlPlay))
+
+    //    mkObj[S, proc.Control ](r, "main"     , DEFAULT_VERSION)(mkCtlMain())
+
+    mkObj[S, proc.Markdown](r, "read-me", DEFAULT_VERSION)(mkMarkdownReadme())
+    mkObj[S, proc.Markdown](r, "license", DEFAULT_VERSION)(mkMarkdownLicense())
+
+    mkObj[S, proc.Widget  ](r, "initialize", DEFAULT_VERSION)(mkWgtInitialize())
+
+    mkObj[S, proc.Widget  ](r, "control", DEFAULT_VERSION)(mkWgtControl(
+      pRenderLoop = pRenderLoop,
+      pPlayLoop   = pPlayLoop,
       cueDb   = cueDb,
       cuePh   = cuePh,
       dbCount = dbCount,
@@ -230,18 +242,179 @@ object Builder {
     f
   }
 
-  def mkWgtReset[S <: Sys[S]](
-                               cueDb: proc.AudioCue.Obj[S],
-                               cuePh: proc.AudioCue.Obj[S],
-                               dbCount: IntObj[S],
-                               phCount: IntObj[S],
+  def mkCtlLoopRun[S <: Sys[S]](
+                                 peer: stm.Obj[S],
+                               )
+                               (implicit tx: S#Tx): proc.Control[S] = {
+    val c = proc.Control[S]()
+    c.attr.put("play"   , peer)
+
+    import de.sciss.lucre.expr.graph._
+
+    c.setGraph {
+      val r = Runner("play")
+
+      LoadBang()  ---> r.run
+      r.done      ---> r.run
+    }
+
+    c
+  }
+
+  def mkMarkdownReadme[S <: Sys[S]]()(implicit tx: S#Tx): proc.Markdown[S] = {
+    val text =
+      """# Read Me
+        |
+        |This is version 0.1 - the first, in early stage - of the sound algorithms
+        |of _Writing (Simultan)_, an installation piece that reconfigures the two
+        |previous instances _Writing Machine_ (2011) and _wr\_t\_ng m\_ch\_n\__
+        |(2017), within the context of the artistic research project
+        |_Algorithms that Matter_.
+        |
+        |## Background
+        |
+        |The basic principle of the piece(s) is to initiate a possibly endless
+        |writing and rewriting process, that puts the eigenmotion of that process
+        |to the front, and the signification of the "raw" or "input" sound material
+        |to the background.
+        |
+        |The basic algorithm is always similar: There is a sound "database", a
+        |reservoir of sound material, that is always kept "filled" till a certain
+        |level. A process iteratively evolves a "sound phrase", a sound object
+        |of a few dozen seconds, by identifying a portion in the current object
+        |that should be overwritten, then searching the database for an
+        |acoustically similar fragment, cutting it out from the database and
+        |pasting it over the identified location. At the same time, small movements
+        |are allowed that make the sound phrase slowly expand and contract in
+        |duration.
+        |
+        |The display of the installation is through a circular field of petri-dishes
+        |which contain piezo speakers, arranged in a certain number of channels, and
+        |thus the sound gesture may move around the circle as it evolves.
+        |
+        |In the __first instance__ (_Writing Machine_), I used a television sound
+        |signal from a news channel. It was using 72 petri-dishes in three concentric
+        |circles, each circle using graphite power of a different granularity and
+        |appearence. The sound installation was run from a single computer, and
+        |using eight or nine channels.
+        |
+        |In the __second instance__ (_wr\_t\_ng m\_ch\_n\__), I used a local radio
+        |(FM) station signal. The petri-dish arrangement was identical, but this time
+        |I experimented with a "distributed sound memory", using nine Raspberry Pis,
+        |each representing two channels or memories which were evolved independent
+        |from one another (so you would identify a sound phrase, each time it was
+        |returning to the same sector). Also, here the computers and the antenna were
+        |visible, and I selected only one type of graphite and combined it with the
+        |bodies of dead bees.
+        |
+        |The physical arrangement of the __third instance__ is still not decided
+        |(as of this writing), although I think I want to replace the "disc" like
+        |shape of the petri-dish placement with a form that places them along the
+        |walls of the exhibition site, e.g. on side boards. The new title
+        |_Writing (Simultan)_ also highlights a new interest in the
+        |coming-together of otherwise independently operating processes. How this
+        |is translated into the algorithms, will be elaborated in future versions
+        |of this workspace.
+        |
+        |## This Workspace
+        |
+        |This _Mellite_ workspace contains an ongoing experiment to recreate (and
+        |develop) the piece with the software now being fully implemented within
+        |_Mellite_. The first instance was using an early version of
+        |_Sound Processes_, the second instance was using a recent version of
+        |_Sound Processes_, but the algorithm's logic was still implemented in terms
+        |of plain Scala code, using the software API and writing the code in a
+        |regular code editor. This new version attempts to understand, how working
+        |in a live programming environment such as _Mellite_ changes my approach of
+        |developing the piece, as well as understanding and testing new abstractions
+        |for the formulation of the algorithms (notably the so-called the `Control`
+        |object with its `Ex`, `Act`, `Trig` abstractions).
+        |
+        |The current version is an early skeleton in which I have translated (and
+        |still simplified) the algorithm of _wr\_t\_ng m\_ch\_n\__, i.e. I took the
+        |plain Scala code of the control logic, and translated it into `Control`
+        |objects. This still does not contain the movements of the parameters over
+        |time, nor does it represent the networked multi-channel interaction, it
+        |just implements a single channel of evolution.
+        |
+        |To run the experiment, you have to configure the _Mellite_ preferences
+        |so that in the audio section, there is at least one input and one output
+        |channel. Then make sure to boot the audio server in the main window,
+        |before proceeding (you can choose 'automatic boot' in the preferences).
+        |As I'm not yet decided on the sound input signal, the workspace just uses
+        |the first input channel which is probably your microphone signal, or you
+        |could wire it up using the Jack Audio Connection Kit (Linux, mac) to
+        |receive a sound signal from any other real-time source.
+        |
+        |The workspace itself contains a small 'control' user interface that you
+        |can open. The main search and replace algorithm is activated with the
+        |'Render Loop' checkbox. Once you click that, you should see messages
+        |appearing in the post window. Initially your database and phrase files
+        |will be empty, so it will take a while, until the database has been
+        |filled to its given maximum (currently: three minutes). The 'Play Loop'
+        |then simply starts playing back the current sound phrase in a loop, so it
+        |advances as the phrase is updated. It currently begins with a very short
+        |sound, which then evolves over time to a target duration of thirty seconds.
+        |This will change in the future.
+        |
+        |Should you ever want to start over, you can stop both loops, and reset the
+        |database and phrase counters using the 'Reset State' button.
+        |
+        |__Note:__ The algorithm currently does not delete old database and phrase
+        |files, so they may start taking significant space (several gigabytes) on
+        |your harddrive. After the experiments, you may wish to delete these files
+        |on your harddrive.
+        |
+        |Please feel free to look into all the partial code objects inside the
+        |'aux' folder, and if you want to learn more about them, get in touch.
+        |""".stripMargin
+    val m = proc.Markdown.newVar(proc.Markdown.newConst(text))
+    m.attr.put("edit-mode", BooleanObj.newVar(false))
+    m
+  }
+
+  def mkMarkdownLicense[S <: Sys[S]]()(implicit tx: S#Tx): proc.Markdown[S] = {
+    val text =
+      """# Workspace License: CC BY-SA 4.0
+        |
+        |The workspace and its contents (sound code etc.) was authored by
+        |Hanns Holger Rutz, and is made available under the
+        |Creative Commons Attribution-ShareAlike 4.0 International license
+        |( __CC&nbsp;BY-SA&nbsp;4.0__ ).
+        |
+        |See [creativecommons.org/licenses/by-sa/4.0](https://creativecommons.org/licenses/by-sa/4.0/)
+        |
+        |----
+        |
+        |Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+        |This is a human-readable summary of (and not a substitute for) the license. Disclaimer.
+        |You are free to:
+        |
+        | - Share — copy and redistribute the material in any medium or format
+        | - Adapt — remix, transform, and build upon the material
+        |    for any purpose, even commercially.
+        |""".stripMargin
+    val m = proc.Markdown.newVar(proc.Markdown.newConst(text))
+    m.attr.put("edit-mode", BooleanObj.newVar(false))
+    m
+  }
+
+  def mkWgtControl[S <: Sys[S]](
+                                 pRenderLoop: stm.Obj[S],
+                                 pPlayLoop  : stm.Obj[S],
+                                 cueDb      : proc.AudioCue.Obj[S],
+                                 cuePh      : proc.AudioCue.Obj[S],
+                                 dbCount    : IntObj[S],
+                                 phCount    : IntObj[S],
                              )
-                             (implicit tx: S#Tx): proc.Widget[S] = {
+                               (implicit tx: S#Tx): proc.Widget[S] = {
     val w = proc.Widget[S]()
-    w.attr.put("database" , cueDb)
-    w.attr.put("phrase"   , cuePh)
-    w.attr.put("db-count" , dbCount)
-    w.attr.put("ph-count" , phCount)
+    w.attr.put("render-loop", pRenderLoop)
+    w.attr.put("play-loop"  , pPlayLoop)
+    w.attr.put("database"   , cueDb)
+    w.attr.put("phrase"     , cuePh)
+    w.attr.put("db-count"   , dbCount)
+    w.attr.put("ph-count"   , phCount)
     w.attr.put("edit-mode" , BooleanObj.newVar(false))
 
     import de.sciss.lucre.expr.ExImport._
@@ -265,7 +438,7 @@ object Builder {
       bReset ---> Act(
         dbCount.set(0),
         phCount.set(0),
-//        dbCueIn.set(AudioCue(dbFileOut, AudioFileSpec.Empty())),
+        // dbCueIn.set(AudioCue(dbFileOut, AudioFileSpec.Empty())),
         dbCueIn.set(AudioCue(dbFileOut, AudioFileSpec.Read(dbFileOut).getOrElse(AudioFileSpec.Empty()))),
         phCueIn.set(AudioCue(phFileOut, AudioFileSpec.Empty())),
         phCueIn.set(AudioCue(phFileOut, AudioFileSpec.Read(phFileOut).getOrElse(AudioFileSpec.Empty()))),
@@ -278,13 +451,28 @@ object Builder {
         PrintLn("ph-cue   = " ++ phCueIn.toStr),
       )
 
+      def mkLooper(key: String): Component = {
+        val ggLp  = CheckBox()
+        val rLp   = Runner(key)
+        val vLp   = ggLp.selected()
+        vLp   .toTrig ---> rLp.run
+        (!vLp).toTrig ---> rLp.stop
+        ggLp
+      }
+
+      val ggRenderLoop = mkLooper("render-loop")
+      val ggPlayLoop   = mkLooper("play-loop")
+
       val p = GridPanel(
-        Label("Reset State:"),
-        bReset,
-        Label("Info:"),
-        bInfo,
+        Label("Render Loop:") , ggRenderLoop,
+        Label("Play Loop:")   , ggPlayLoop,
+        Label("Reset State:") , bReset,
+        Label("Info:")        , bInfo,
       )
-      p.columns = 2
+
+      p.border          = Border.Empty(4)
+      p.columns         = 2
+      p.compactColumns  = true
       p
     }
     w
@@ -422,7 +610,7 @@ object Builder {
       val phCue     = "phrase"  .attr[AudioCue](AudioCue.Empty())
       //val artPh     = Artifact("play:in"  )
       val aIn       = "play:in".attr[AudioCue]
-      val phFile    = phCue.artifact
+      // val phFile    = phCue.artifact
       val fadeIn    = 0.1
       val fadeOut   = 0.25 // XXX TODO: random.nextFloat().linLin(0, 1, 0.1f, 0.5f)
       val aFdIn     = "play:fade-in"  .attr[Double]
@@ -458,10 +646,10 @@ object Builder {
   def mkProcPlayPhrase[S <: Sys[S]]()(implicit tx: S#Tx): proc.Proc[S] = {
     val p = proc.Proc[S]()
 
+    import de.sciss.synth.Curve
     import de.sciss.synth.proc.graph.Ops.stringToControl
     import de.sciss.synth.proc.graph._
     import de.sciss.synth.ugen.{DiskOut => _, VDiskIn => _, _}
-    import de.sciss.synth.Curve
 
     p.setGraph {
       val bus     = "bus"     .ir(0.0)
@@ -483,16 +671,16 @@ object Builder {
     p
   }
 
-  def mkCtlIterate[S <: Sys[S]](pFillDb     : stm.Obj[S],
-                                pOvrSelect  : stm.Obj[S],
-                                pMatchSelect: stm.Obj[S],
-                                pOvrPerform : stm.Obj[S],
-                                cueDb: proc.AudioCue.Obj[S],
-                                cuePh: proc.AudioCue.Obj[S],
-                                dbCount     : IntObj[S],
-                                phCount     : IntObj[S],
+  def mkCtlRender[S <: Sys[S]](pFillDb     : stm.Obj[S],
+                               pOvrSelect  : stm.Obj[S],
+                               pMatchSelect: stm.Obj[S],
+                               pOvrPerform : stm.Obj[S],
+                               cueDb: proc.AudioCue.Obj[S],
+                               cuePh: proc.AudioCue.Obj[S],
+                               dbCount     : IntObj[S],
+                               phCount     : IntObj[S],
                                )
-                               (implicit tx: S#Tx): proc.Control[S] = {
+                              (implicit tx: S#Tx): proc.Control[S] = {
     val c = proc.Control[S]()
     c.attr.put("database-fill"    , pFillDb)
     c.attr.put("overwrite-select" , pOvrSelect)
@@ -1099,15 +1287,50 @@ object Builder {
     c
   }
 
-  def mkCtlMain[S <: Sys[S]]()(implicit tx: S#Tx): proc.Control[S] = {
-    val c = proc.Control[S]()
-    import de.sciss.lucre.expr.graph._
+  def mkWgtInitialize[S <: Sys[S]]()(implicit tx: S#Tx): proc.Widget[S] = {
+    val w = proc.Widget[S]()
+    w.attr.put("edit-mode", BooleanObj.newVar(false))
 
-    c.setGraph {
-      // main entrance point to the installation
-      LoadBang() ---> PrintLn("---- Writing (simultan) ----")
+    import de.sciss.lucre.expr.graph._
+    import de.sciss.lucre.swing.graph._
+
+    w.setGraph {
+      val pf = PathField()
+      pf.mode = PathField.Folder
+
+      val p = GridPanel(
+        Label("Sound file base directory:"),
+        pf,
+        Empty(),
+        Label(
+          "<html><body>Initialization creates three<p>" +
+            "sub-directories here: 'db', 'ph', 'tmp'.<p>" +
+            "Make sure there is enough free space."
+        )
+      )
+
+      p.border          = Border.Empty(4)
+      p.columns         = 2
+      p.compactColumns  = true
+
+      val baseDir = pf.value()
+
+      val ggInit = Button("Initialize")
+      ggInit.clicked ---> Act(
+        (baseDir / "db").mkDir,
+        (baseDir / "ph").mkDir,
+        (baseDir / "tmp").mkDir,
+      )
+
+      val bp = BorderPanel(
+        north = p,
+        south = FlowPanel(ggInit)
+      )
+
+      bp.border          = Border.Empty(4)
+      bp
     }
 
-    c
+    w
   }
 }

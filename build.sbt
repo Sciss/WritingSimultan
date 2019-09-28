@@ -7,6 +7,7 @@ lazy val deps = new {
   val main = new {
     val fscape          = "2.31.0-SNAPSHOT"
     val lucre           = "3.15.2-SNAPSHOT"
+    val lucreSwing      = "1.19.1-SNAPSHOT"
     val soundProcesses  = "3.32.2-SNAPSHOT"
     val span            = "1.4.3"
   }
@@ -40,6 +41,7 @@ lazy val root = project.withId(baseNameL).in(file("."))
       "de.sciss"  %% "span"           % deps.main.span,
       "de.sciss"  %% "lucre-expr"     % deps.main.lucre,
       "de.sciss"  %% "lucre-bdb"      % deps.main.lucre,
+      "de.sciss"  %% "lucre-swing"    % deps.main.lucreSwing,
     ),
     scalacOptions += "-Yrangepos",  // this is needed to extract source code
     fork in run := true,
