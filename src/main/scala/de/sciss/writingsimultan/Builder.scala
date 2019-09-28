@@ -18,8 +18,8 @@ import de.sciss.fscape.GE
 import de.sciss.fscape.lucre.FScape
 import de.sciss.fscape.lucre.MacroImplicits._
 import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj}
-import de.sciss.lucre.{artifact, stm}
 import de.sciss.lucre.synth.Sys
+import de.sciss.lucre.{artifact, stm}
 import de.sciss.synth
 import de.sciss.synth.io.{AudioFileType, SampleFormat}
 import de.sciss.synth.proc
@@ -32,18 +32,19 @@ object Builder {
 
 //  protected def any2stringadd: Any = ()
 
-  def apply[S <: Sys[S]](audioBaseDir: File)(implicit tx: S#Tx, workspace: Workspace[S]): Unit = {
-    val dbDir     = audioBaseDir / "db"
-    val phDir     = audioBaseDir / "ph"
-    val tmpDir    = audioBaseDir / "tmp"
-    val dbFile0   = dbDir / "db0.aif"
-    val phFile0   = phDir / "ph0.aif"
-    val tmpFile0  = tmpDir / "rec.irc"
-    tx.afterCommit {
-      dbDir .mkdirs()
-      phDir .mkdirs()
-      tmpDir.mkdirs()
-    }
+  def apply[S <: Sys[S]](/*audioBaseDir: File*/)(implicit tx: S#Tx, workspace: Workspace[S]): Unit = {
+    val audioBaseDir  = userHome
+    val dbDir         = audioBaseDir / "db"
+    val phDir         = audioBaseDir / "ph"
+    val tmpDir        = audioBaseDir / "tmp"
+    val dbFile0       = dbDir / "db0.aif"
+    val phFile0       = phDir / "ph0.aif"
+    val tmpFile0      = tmpDir / "rec.irc"
+//    tx.afterCommit {
+//      dbDir .mkdirs()
+//      phDir .mkdirs()
+//      tmpDir.mkdirs()
+//    }
 
     val r             = workspace.root
     val fAux          = mkFolder(r, "aux")
@@ -60,13 +61,13 @@ object Builder {
     val cueDb = mkObj[S, proc.AudioCue.Obj](fAux, "database", DEFAULT_VERSION) {
 //      val artDb = artifact.Artifact[S](loc, dbFile0)
       val spec0 = synth.io.AudioFileSpec(AudioFileType.AIFF, SampleFormat.Float, numChannels = 1, sampleRate = 48000.0)
-      tx.afterCommit {
-        // create empty file
-        if (!dbFile0.exists()) {
-          val af = synth.io.AudioFile.openWrite(dbFile0, spec0)
-          af.close()
-        }
-      }
+//      tx.afterCommit {
+//        // create empty file
+//        if (!dbFile0.exists()) {
+//          val af = synth.io.AudioFile.openWrite(dbFile0, spec0)
+//          af.close()
+//        }
+//      }
 //      proc.AudioCue.Obj[S](artDb, spec0, 0L, 1.0)
       // N.B.: Obj.Bridge can only do in-place update with Expr.Var!
       proc.AudioCue.Obj.newVar[S](
@@ -78,13 +79,13 @@ object Builder {
 
     val cuePh = mkObj[S, proc.AudioCue.Obj](fAux, "phrase", DEFAULT_VERSION) {
       val spec0 = synth.io.AudioFileSpec(AudioFileType.AIFF, SampleFormat.Float, numChannels = 1, sampleRate = 48000.0)
-      tx.afterCommit {
-        // create empty file
-        if (!phFile0.exists()) {
-          val af = synth.io.AudioFile.openWrite(phFile0, spec0)
-          af.close()
-        }
-      }
+//      tx.afterCommit {
+//        // create empty file
+//        if (!phFile0.exists()) {
+//          val af = synth.io.AudioFile.openWrite(phFile0, spec0)
+//          af.close()
+//        }
+//      }
       // N.B.: Obj.Bridge can only do in-place update with Expr.Var!
       proc.AudioCue.Obj.newVar[S](
         proc.AudioCue(
@@ -144,7 +145,16 @@ object Builder {
     mkObj[S, proc.Markdown](r, "read-me", DEFAULT_VERSION)(mkMarkdownReadme())
     mkObj[S, proc.Markdown](r, "license", DEFAULT_VERSION)(mkMarkdownLicense())
 
-    mkObj[S, proc.Widget  ](r, "initialize", DEFAULT_VERSION)(mkWgtInitialize())
+    val fscInit = mkObj[S, FScape](fAux, "init-fsc", DEFAULT_VERSION)(mkFScInitialize())
+    mkObj[S, proc.Widget  ](r, "initialize", DEFAULT_VERSION)(mkWgtInitialize(
+      fscInit,
+      locBase = loc,
+      cueDb   = cueDb,
+      cuePh   = cuePh,
+      artTmp  = artTmp,
+      dbCount = dbCount,
+      phCount = phCount,
+    ))
 
     mkObj[S, proc.Widget  ](r, "control", DEFAULT_VERSION)(mkWgtControl(
       pRenderLoop = pRenderLoop,
@@ -440,7 +450,7 @@ object Builder {
         phCount.set(0),
         // dbCueIn.set(AudioCue(dbFileOut, AudioFileSpec.Empty())),
         dbCueIn.set(AudioCue(dbFileOut, AudioFileSpec.Read(dbFileOut).getOrElse(AudioFileSpec.Empty()))),
-        phCueIn.set(AudioCue(phFileOut, AudioFileSpec.Empty())),
+        // phCueIn.set(AudioCue(phFileOut, AudioFileSpec.Empty())),
         phCueIn.set(AudioCue(phFileOut, AudioFileSpec.Read(phFileOut).getOrElse(AudioFileSpec.Empty()))),
       )
 
@@ -1187,7 +1197,6 @@ object Builder {
     c.attr.put("query-radio-rec", pQueryRadioRec)
     c.attr.put("append-db"      , pAppendDb)
     c.attr.put("database"       , cueDb)
-    c.attr.put("temp-file"      , artTmp)
     c.attr.put("db-count"       , dbCount)
     pQueryRadioRec.attr.put("out", artTmp)  // XXX TODO `runWith` not yet supported by Proc
     mkObjIn(pQueryRadioRec, "dur", DEFAULT_VERSION) {
@@ -1287,16 +1296,57 @@ object Builder {
     c
   }
 
-  def mkWgtInitialize[S <: Sys[S]]()(implicit tx: S#Tx): proc.Widget[S] = {
+  def mkFScInitialize[S <: Sys[S]]()(implicit tx: S#Tx): FScape[S] = {
+    val f = FScape[S]()
+    import de.sciss.fscape.graph.{AudioFileIn => _, AudioFileOut => _, _}
+    import de.sciss.fscape.lucre.graph._
+
+    f.setGraph {
+      val SR  = 48000.0
+      val sig = 0.0: GE // somehow can't write an empty file
+      AudioFileOut("out-db", sampleRate = SR, in = sig)
+      AudioFileOut("out-ph", sampleRate = SR, in = sig)
+    }
+    f
+  }
+
+  def mkWgtInitialize[S <: Sys[S]](
+                                    fscInit: stm.Obj[S],
+                                    locBase: artifact.ArtifactLocation[S],
+                                    cueDb: proc.AudioCue.Obj[S],
+                                    cuePh: proc.AudioCue.Obj[S],
+                                    artTmp: artifact.Artifact[S],
+                                    dbCount    : IntObj[S],
+                                    phCount    : IntObj[S],
+                                  )(implicit tx: S#Tx): proc.Widget[S] = {
     val w = proc.Widget[S]()
     w.attr.put("edit-mode", BooleanObj.newVar(false))
+    w.attr.put("init-fsc" , fscInit)
+    w.attr.put("database" , cueDb)
+    w.attr.put("phrase"   , cuePh)
+    w.attr.put("base"     , locBase)
+    w.attr.put("tmp-file" , artTmp)
+    w.attr.put("db-count" , dbCount)
+    w.attr.put("ph-count" , phCount)
 
+    import de.sciss.lucre.expr.ExImport._
     import de.sciss.lucre.expr.graph._
     import de.sciss.lucre.swing.graph._
+    import de.sciss.synth.proc.ExImport._
 
     w.setGraph {
       val pf = PathField()
       pf.mode = PathField.Folder
+      pf.value <--> ArtifactLocation("base")
+
+      val rFSc    = Runner("init-fsc")
+      val aDb0    = Artifact("init-fsc:out-db" )
+      val aPh0    = Artifact("init-fsc:out-ph" )
+      val recFile = Artifact("tmp-file")
+      val dbCueIn = "database".attr[AudioCue](AudioCue.Empty())
+      val phCueIn = "phrase"  .attr[AudioCue](AudioCue.Empty())
+      val dbCount = "db-count".attr(0)
+      val phCount = "ph-count".attr(0)
 
       val p = GridPanel(
         Label("Sound file base directory:"),
@@ -1314,12 +1364,28 @@ object Builder {
       p.compactColumns  = true
 
       val baseDir = pf.value()
+      val dbDir   = baseDir / "db"
+      val phDir   = baseDir / "ph"
+      val tmpDir  = baseDir / "tmp"
 
       val ggInit = Button("Initialize")
       ggInit.clicked ---> Act(
-        (baseDir / "db").mkDir,
-        (baseDir / "ph").mkDir,
-        (baseDir / "tmp").mkDir,
+        dbDir.mkDir,
+        phDir.mkDir,
+        tmpDir.mkDir,
+        aDb0.set(dbDir / "db0.aif"),
+        aPh0.set(phDir / "ph0.aif"),
+        rFSc.run
+      )
+
+      rFSc.failed ---> PrintLn(rFSc.messages.mkString("Init failed: ", "\n", ""))
+      rFSc.done ---> Act(
+        dbCueIn.set(AudioCue(aDb0, AudioFileSpec.Read(aDb0).getOrElse(AudioFileSpec.Empty()))),
+        phCueIn.set(AudioCue(aPh0, AudioFileSpec.Read(aPh0).getOrElse(AudioFileSpec.Empty()))),
+        recFile.set(tmpDir / "rec.irc"),
+        dbCount.set(0),
+        phCount.set(0),
+        PrintLn("Initialized.")
       )
 
       val bp = BorderPanel(
