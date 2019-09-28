@@ -16,6 +16,8 @@ No reuse or changes permitted without explicit written consent.
 
 Corresponding Research Catalogue page: https://www.researchcatalogue.net/view/665526/665527
 
+The _workspace_ produced is covered by the Creative Commons Attribution-ShareAlike 4.0 International ([CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)) license.
+
 ## building
 
 All sub-projects build with sbt against Scala 2.13.
