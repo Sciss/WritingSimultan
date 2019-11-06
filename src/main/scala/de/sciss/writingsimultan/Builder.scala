@@ -1138,7 +1138,7 @@ object Builder {
       // val phCount1        = phCount.latch(loadBang) + (1: Ex[Int])
       // val phFileOut       = phFileIn.replaceName("ph" ++ phCount1.toStr ++ ".aif")
 
-      val actSelect: Ex[Act] = {
+      val actSelect: Act = {
         val recRun: Act = rSelect.runWith(
           "space-dur" -> spaceDur,
           "in"        -> phFileIn,
@@ -1171,7 +1171,7 @@ object Builder {
       val newDiff1    = len1 - len0
       val newLength   = newDiff1 + span.length
 
-      val actDone: Ex[Act] =
+      val actDone: Act =
         Act(
           PrintLn("selected - start0: " ++ spanStart0.toStr ++
             " ; stop0: " ++ spanStop0.toStr ++
@@ -1267,7 +1267,7 @@ object Builder {
         rAppendDb.run
       )
 
-      val actRec: Ex[Act] = {
+      val actRec: Act = {
         val dbLen = dbCueIn.numFrames
         val captLen: Ex[Long] = maxCaptureLen min (dbTargetLen - dbLen)
         If (captLen < minCaptureLen) Then {
