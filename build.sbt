@@ -8,6 +8,7 @@ lazy val deps = new {
     val fscape          = "2.33.0"
     val lucre           = "3.16.1"
     val lucreSwing      = "1.20.0"
+    val patterns        = "0.17.0-SNAPSHOT"
     val soundProcesses  = "3.33.0"
     val span            = "1.4.3"
   }
@@ -21,7 +22,7 @@ lazy val commonSettings = Seq(
   homepage           := Some(url(s"https://git.iem.at/sciss/$baseName")),
   description        := "A sound installation",
   licenses           := Seq("AGPL v3+" -> url("http://www.gnu.org/licenses/agpl-3.0.txt")),
-  scalaVersion       := "2.13.1",
+  scalaVersion       := "2.13.0", // "2.13.1",
   scalacOptions     ++= Seq("-deprecation", "-unchecked", "-feature", "-encoding", "utf8", "-Xsource:2.13", "-Xlint:-stars-align,_"),
   scalacOptions     ++= {
     if (loggingEnabled || isSnapshot.value) Nil else Seq("-Xelide-below", "INFO")
@@ -36,12 +37,13 @@ lazy val root = project.withId(baseNameL).in(file("."))
   .settings(
     name := baseName,
     libraryDependencies ++= Seq(
-      "de.sciss"  %% "soundprocesses" % deps.main.soundProcesses,
-      "de.sciss"  %% "fscape-macros"  % deps.main.fscape,
-      "de.sciss"  %% "span"           % deps.main.span,
-      "de.sciss"  %% "lucre-expr"     % deps.main.lucre,
-      "de.sciss"  %% "lucre-bdb"      % deps.main.lucre,
-      "de.sciss"  %% "lucre-swing"    % deps.main.lucreSwing,
+      "de.sciss"  %% "soundprocesses"   % deps.main.soundProcesses,
+      "de.sciss"  %% "fscape-macros"    % deps.main.fscape,
+      "de.sciss"  %% "patterns-macros"  % deps.main.patterns,
+      "de.sciss"  %% "span"             % deps.main.span,
+      "de.sciss"  %% "lucre-expr"       % deps.main.lucre,
+      "de.sciss"  %% "lucre-bdb"        % deps.main.lucre,
+      "de.sciss"  %% "lucre-swing"      % deps.main.lucreSwing,
     ),
     scalacOptions += "-Yrangepos",  // this is needed to extract source code
     fork in run := true,

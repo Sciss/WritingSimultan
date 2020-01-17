@@ -16,6 +16,7 @@ package de.sciss.writingsimultan
 import de.sciss.file._
 import de.sciss.fscape.lucre.FScape
 import de.sciss.lucre.stm.store.BerkeleyDB
+import de.sciss.patterns.lucre.Pattern
 import de.sciss.synth.proc.{Durable, SoundProcesses, Widget, Workspace}
 
 object Main {
@@ -26,6 +27,7 @@ object Main {
   def main(args: Array[String]): Unit = {
     val projectDir    = file("/data/projects/WritingSimultan")
     val wsFile        = projectDir / "writing-simultan.mllt"
+//    val wsFile        = projectDir / "pat-test.mllt"
 //    val audioBaseDir  = projectDir / "audio_work"
     implicit val cf: Config = Config(
       wsFile        = wsFile,
@@ -38,6 +40,7 @@ object Main {
     SoundProcesses.init()
     FScape        .init()
     Widget        .init()
+    Pattern       .init()
 
     val store = BerkeleyDB.factory(config.wsFile, createIfNecessary = true)
     implicit val ws: Workspace[S] = Workspace.Durable.empty(config.wsFile, store)

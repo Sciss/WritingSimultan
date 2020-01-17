@@ -20,10 +20,11 @@ import de.sciss.fscape.lucre.MacroImplicits._
 import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj}
 import de.sciss.lucre.synth.Sys
 import de.sciss.lucre.{artifact, stm}
-import de.sciss.synth
+import de.sciss.{patterns, synth}
 import de.sciss.synth.io.{AudioFileType, SampleFormat}
 import de.sciss.synth.proc
 import de.sciss.synth.proc.MacroImplicits._
+import de.sciss.patterns.lucre.MacroImplicits._
 import de.sciss.synth.proc.Workspace
 import de.sciss.writingsimultan.BuilderUtil._
 
@@ -31,6 +32,28 @@ object Builder {
   val DEFAULT_VERSION = 1
 
 //  protected def any2stringadd: Any = ()
+
+//  def patTest[S <: Sys[S]](/*audioBaseDir: File*/)(implicit tx: S#Tx, workspace: Workspace[S]): Unit = {
+//    val r = workspace.root
+//    mkObj[S, patterns.lucre.Pattern](r, "Pattern", DEFAULT_VERSION) {
+//      val obj = patterns.lucre.Pattern[S]()
+//      import de.sciss.patterns.graph._
+//      obj.setGraph {
+//        val b = Brown(0, 127, 2)
+//        b
+//      }
+//      obj
+//    }
+//    mkObj[S, patterns.lucre.Stream](r, "Stream", DEFAULT_VERSION) {
+//      val obj = patterns.lucre.Stream[S]()
+//      import de.sciss.patterns.graph._
+//      obj.setGraph {
+//        val b = Brown(0, 127, 2)
+//        b
+//      }
+//      obj
+//    }
+//  }
 
   def apply[S <: Sys[S]](/*audioBaseDir: File*/)(implicit tx: S#Tx, workspace: Workspace[S]): Unit = {
     val audioBaseDir  = userHome
@@ -602,6 +625,7 @@ object Builder {
     }
     f
   }
+
   def mkCtlPlayPhrase[S <: Sys[S]](procPlay: proc.Proc[S],
                                     cuePh: proc.AudioCue.Obj[S],
                                   )
