@@ -20,7 +20,8 @@ import de.sciss.fscape.lucre.MacroImplicits._
 import de.sciss.lucre.expr.{BooleanObj, DoubleObj, IntObj}
 import de.sciss.lucre.synth.Sys
 import de.sciss.lucre.{artifact, stm}
-import de.sciss.{patterns, synth}
+import de.sciss.synth
+import de.sciss.patterns.lucre.{Stream => LStream}
 import de.sciss.synth.io.{AudioFileType, SampleFormat}
 import de.sciss.synth.proc
 import de.sciss.synth.proc.MacroImplicits._
@@ -158,8 +159,10 @@ object Builder {
 
     val pProcPlay = mkObj[S, proc.Proc](fAux, "play-phrase-proc", DEFAULT_VERSION)(mkProcPlayPhrase[S]())
 
+    val sPlayFadeout = mkObj[S, LStream](fAux, "play-fade-out", DEFAULT_VERSION)(mkStreamPlayFadeout[S]())
+
     val pCtlPlay = mkObj[S, proc.Control](fAux, "play-phrase", DEFAULT_VERSION) {
-      mkCtlPlayPhrase(procPlay = pProcPlay, cuePh = cuePh)
+      mkCtlPlayPhrase(procPlay = pProcPlay, cuePh = cuePh, sFadeOut = sPlayFadeout)
     }
 
     val pRender = mkObj[S, proc.Control ](fAux, "render", DEFAULT_VERSION)(
@@ -626,13 +629,24 @@ object Builder {
     f
   }
 
+  def mkStreamPlayFadeout[S <: Sys[S]]()(implicit tx: S#Tx): LStream[S] = {
+    val s = LStream[S]()
+    import de.sciss.patterns.graph._
+    s.setGraph {
+      White(0.1, 0.5)
+    }
+    s
+  }
+
   def mkCtlPlayPhrase[S <: Sys[S]](procPlay: proc.Proc[S],
                                     cuePh: proc.AudioCue.Obj[S],
+                                    sFadeOut: LStream[S],
                                   )
                                   (implicit tx: S#Tx): proc.Control[S] = {
     val c = proc.Control[S]()
-    c.attr.put("play"   , procPlay)
-    c.attr.put("phrase" , cuePh)
+    c.attr.put("play"     , procPlay)
+    c.attr.put("phrase"   , cuePh)
+    c.attr.put("fade-out" , sFadeOut)
 
     import de.sciss.lucre.expr.ExImport._
     import de.sciss.lucre.expr.graph._
@@ -665,16 +679,17 @@ object Builder {
       val aIn       = "play:in".attr[AudioCue]
       // val phFile    = phCue.artifact
       val fadeIn    = 0.1
-      val fadeOut   = 0.25 // XXX TODO: random.nextFloat().linLin(0, 1, 0.1f, 0.5f)
+      val stFadeOut = "fade-out".attr(Stream()).next(0.25)
       val aFdIn     = "play:fade-in"  .attr[Double]
       val aFdOut    = "play:fade-out" .attr[Double]
       val aDur      = "play:dur"      .attr[Double]
       val phDur     = phCue.numFrames / phCue.sampleRate
       val actPlay = Act(
         //  artPh .set(phFile),
+        stFadeOut,  // pick next one
         aIn   .set(phCue),
         aFdIn .set(fadeIn),    // XXX TODO --- runWith not yet supported
-        aFdOut.set(fadeOut),
+        aFdOut.set(stFadeOut),
         aDur  .set(phDur),
         rPlay.run,
       )
