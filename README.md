@@ -3,10 +3,11 @@
 # Writing (simultan)
 
 This repository builds the second reconfiguration of the piece 'Writing Machine', this time attempting of
-implementing all aspects within a Mellite workspace.
+implementing all aspects within a Mellite workspace. See
+[Research Catalogue](https://www.researchcatalogue.net/view/665526/665527)
 
 Unless specified differently in the sub-projects, all code and materials are
-(C)opyright 2019 by Hanns Holger Rutz. All rights reserved. This project is released under the
+(C)opyright 2019–2020 by Hanns Holger Rutz. All rights reserved. This project is released under the
 [GNU Affero General Public License](https://git.iem.at/sciss/WritingSimultan/blob/master/LICENSE) v3+ and
 comes with absolutely no warranties.
 To contact the author, send an email to `contact at sciss.de`.
@@ -16,7 +17,8 @@ No reuse or changes permitted without explicit written consent.
 
 Corresponding Research Catalogue page: https://www.researchcatalogue.net/view/665526/665527
 
-The _workspace_ produced is covered by the Creative Commons Attribution-ShareAlike 4.0 International ([CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)) license.
+The _workspace_ produced is covered by the Creative Commons Attribution-ShareAlike 4.0 International
+([CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)) license.
 
 ## building
 

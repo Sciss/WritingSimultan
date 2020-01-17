@@ -2,7 +2,7 @@
  *  Main.scala
  *  Writing (simultan)
  *
- *  Copyright (c) 2019 Hanns Holger Rutz. All rights reserved.
+ *  Copyright (c) 2019-2020 Hanns Holger Rutz. All rights reserved.
  *
  *  This software is published under the GNU Affero General Public License v3+
  *
@@ -41,7 +41,8 @@ object Main {
 
     val store = BerkeleyDB.factory(config.wsFile, createIfNecessary = true)
     implicit val ws: Workspace[S] = Workspace.Durable.empty(config.wsFile, store)
-    ws.cursor.step { implicit tx =>
+    ws.cursor.
+      step { implicit tx =>
       Builder(/*audioBaseDir = config.audioBaseDir*/)
     }
     ws.close()

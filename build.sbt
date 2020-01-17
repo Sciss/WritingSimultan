@@ -1,12 +1,12 @@
 lazy val baseName   = "WritingSimultan"
 lazy val baseNameL  = baseName.toLowerCase
 
-lazy val projectVersion = "0.2.0"
+lazy val projectVersion = "0.3.0-SNAPSHOT"
 
 lazy val deps = new {
   val main = new {
-    val fscape          = "2.32.0"
-    val lucre           = "3.16.0"
+    val fscape          = "2.33.0"
+    val lucre           = "3.16.1"
     val lucreSwing      = "1.20.0"
     val soundProcesses  = "3.33.0"
     val span            = "1.4.3"
