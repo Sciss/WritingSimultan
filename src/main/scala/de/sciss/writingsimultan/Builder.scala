@@ -141,10 +141,20 @@ object Builder {
     }
 
     val fscOvrSelect = mkObj[S, FScape](fAux, "overwrite-select-fsc" , DEFAULT_VERSION)(mkFScOverwriteSelect[S]())
+
+    val sStretchStable = mkObj[S, LStream](fAux, "stretch-stable" , DEFAULT_VERSION)(mkStreamStretchStable[S]())
+    val sStretchGrow   = mkObj[S, LStream](fAux, "stretch-grow"   , DEFAULT_VERSION)(mkStreamStretchGrow  [S]())
+    val sStretchShrink = mkObj[S, LStream](fAux, "stretch-shrink" , DEFAULT_VERSION)(mkStreamStretchShrink[S]())
+    val sRNG           = mkObj[S, LStream](fAux, "rng"            , DEFAULT_VERSION)(mkStreamRNG          [S]())
+
     val pOvrSelect = mkObj[S, proc.Control](fAux, "overwrite-select", DEFAULT_VERSION) {
       mkCtlSelectOverwrite(
         fscOvrSelect = fscOvrSelect,
         cuePh = cuePh,
+        strStretchStable  = sStretchStable,
+        strStretchGrow    = sStretchGrow,
+        strStretchShrink  = sStretchShrink,
+        strRNG            = sRNG,
 //        phCount = phCount,
       )
     }
@@ -316,7 +326,7 @@ object Builder {
     val text =
       """# Read Me
         |
-        |This is version 0.1 - the first, in early stage - of the sound algorithms
+        |This is version 0.3 - in intermediate stage - of the sound algorithms
         |of _Writing (Simultan)_, an installation piece that reconfigures the two
         |previous instances _Writing Machine_ (2011) and _wr\_t\_ng m\_ch\_n\__
         |(2017), within the context of the artistic research project
@@ -442,12 +452,37 @@ object Builder {
         |----
         |
         |Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
-        |This is a human-readable summary of (and not a substitute for) the license. Disclaimer.
-        |You are free to:
+        |This is a human-readable summary of (and not a substitute for) the license linked above.
         |
-        | - Share — copy and redistribute the material in any medium or format
-        | - Adapt — remix, transform, and build upon the material
+        |## You are free to:
+        |
+        | - __Share__ — copy and redistribute the material in any medium or format
+        | - __Adapt__ — remix, transform, and build upon the material
         |    for any purpose, even commercially.
+        |
+        |The licensor cannot revoke these freedoms as long as you follow the license terms.
+        |
+        |## Under the following terms:
+        |
+        | - __Attribution__ — You must give appropriate credit, provide a link to the license,
+        |   and indicate if changes were made. You may do so in any reasonable manner, but not in
+        |   any way that suggests the licensor endorses you or your use.
+        |
+        | - __ShareAlike__ — If you remix, transform, or build upon the material, you must
+        |   distribute your contributions under the same license as the original.
+        |
+        | - __No additional restrictions__ — You may not apply legal terms or technological measures
+        |   that legally restrict others from doing anything the license permits.
+        |
+        |## Notices:
+        |
+        |You do not have to comply with the license for elements of the material in the public domain
+        |or where your use is permitted by an applicable exception or limitation.
+        |
+        |No warranties are given. The license may not give you all of the permissions necessary for your
+        |intended use. For example, other rights such as publicity, privacy, or moral rights may limit
+        |how you use the material.
+        |
         |""".stripMargin
     val m = proc.Markdown.newVar(proc.Markdown.newConst(text))
     m.attr.put("edit-mode", BooleanObj.newVar(false))
@@ -1083,15 +1118,61 @@ object Builder {
     f
   }
 
+  def mkStreamStretchStable[S <: Sys[S]]()(implicit tx: S#Tx): LStream[S] = {
+    val s = LStream[S]()
+    import de.sciss.patterns.graph._
+    s.setGraph {
+      Brown(0, 1, 0.1).linExp(0, 1, 1.0 / 1.1, 1.1)
+    }
+    s
+  }
+
+  def mkStreamStretchGrow[S <: Sys[S]]()(implicit tx: S#Tx): LStream[S] = {
+    val s = LStream[S]()
+    import de.sciss.patterns.graph._
+    s.setGraph {
+      Brown(1.2, 2.0, 0.2)
+    }
+    s
+  }
+
+  def mkStreamStretchShrink[S <: Sys[S]]()(implicit tx: S#Tx): LStream[S] = {
+    val s = LStream[S]()
+    import de.sciss.patterns.graph._
+    s.setGraph {
+      Brown(0.6, 0.95, 0.2)
+    }
+    s
+  }
+
+  def mkStreamRNG[S <: Sys[S]]()(implicit tx: S#Tx): LStream[S] = {
+    val s = LStream[S]()
+    import de.sciss.patterns.graph._
+    s.setGraph {
+      White(0.0, 1.0)
+    }
+    s
+  }
+
   def mkCtlSelectOverwrite[S <: Sys[S]](
                                          fscOvrSelect: stm.Obj[S],
                                          cuePh: proc.AudioCue.Obj[S],
                                          // phCount: IntObj[S],
+                                          strStretchStable: LStream[S],
+                                          strStretchGrow  : LStream[S],
+                                          strStretchShrink: LStream[S],
+                                          strRNG          : LStream[S],
                                        )
                                        (implicit tx: S#Tx): proc.Control[S] = {
     val c = proc.Control[S]()
     c.attr.put("select"   , fscOvrSelect)
     c.attr.put("phrase"   , cuePh)
+    c.attr.put("stretch"        , strStretchStable)
+    c.attr.put("stretch-stable" , strStretchStable)
+    c.attr.put("stretch-grow"   , strStretchGrow  )
+    c.attr.put("stretch-shrink" , strStretchShrink)
+    c.attr.put("rng"            , strRNG          )
+
     // c.attr.put("ph-count" , phCount)
 
     import de.sciss.lucre.expr.ExImport._
@@ -1108,33 +1189,40 @@ object Builder {
       val len0  = ph0.numFrames
       val SR    = 48000.0
 
-      val minPhaseDur =   3.0
-      val minPhInsDur =   1.5 // 3.0
-      val maxPhaseDur =  30.0 // 150.0
-      // val minStabDur  =  10.0
-      val minPhaseLen = (SR * minPhaseDur).toLong
-      val minPhInsLen = (SR * minPhInsDur).toLong
-      val maxPhaseLen = (SR * maxPhaseDur).toLong
+      val minPhaseDur   =   3.0
+      val minPhInsDur   =   1.5 // 3.0
+      val maxPhaseDur   =  30.0 // 150.0
+      val minStabDur    =  10.0
+      val stableDurProb =   3.0 / 100
+      val minPhaseLen   = (SR * minPhaseDur).toLong
+      val minPhInsLen   = (SR * minPhInsDur).toLong
+      val maxPhaseLen   = (SR * maxPhaseDur).toLong
 
-      // val pDur = len0 / SR // framesToSeconds(len0)
-      // val mStretch = If (pDur <= minPhaseDur) Then {
-      //   stretchMotion.set(stretchGrow)
-      //   stretchGrow
-      //   ???
-      // } ElseIf (pDur >= maxPhaseDur) Then {
-      //   stretchMotion.set(stretchShrink)
-      //   stretchShrink
-      //   ???
-      // } ElseIf (pDur > minStabDur && random.nextDouble() < stableDurProb) Then {
-      //   stretchMotion.set(stretchStable)
-      //   stretchStable
-      //   ???
-      // } Else {
-      //   stretchMotion()
-      //   ???
-      // }
-      //
-      // val fStretch  = mStretch.step()
+      val noStream        = Stream()
+      val mStretch        = "stretch"       .attr(noStream)
+      val mStretchGrow    = "stretch-grow"  .attr(noStream)
+      val mStretchShrink  = "stretch-shrink".attr(noStream)
+      val mStretchStable  = "stretch-stable".attr(noStream)
+      val rng             = "rng"           .attr(noStream)
+      val rngN            = rng.next(0.5)
+
+      val pDur = len0 / SR // framesToSeconds(len0)
+      val actSetStretch = If (pDur <= minPhaseDur) Then Act(
+        PrintLn("-> grow"),
+        mStretch.set(mStretchGrow)
+      ) ElseIf (pDur >= maxPhaseDur) Then Act(
+        PrintLn("-> shrink"),
+        mStretch.set(mStretchShrink)
+      ) ElseIf (pDur > minStabDur) Then Act(
+        rngN, // "draw"
+        If (rngN < stableDurProb) Then Act(
+          PrintLn("-> stable"),
+          mStretch.set(mStretchStable)
+        )
+      )
+
+      val fStretchN = mStretch.next(1.0)
+
       // val useBound  = random.nextDouble() <= ovrBoundaryProb
       // val boundEnd  = useBound && random.nextDouble() > 0.667
       // val jitAmt    = random.nextDouble()
@@ -1154,7 +1242,6 @@ object Builder {
       // val stretchStable   : Motion = Motion.linexp(Motion.walk(0, 1, 0.1), 0, 1, 1.0 / 1.1, 1.1)
       // val stretchGrow     : Motion = Motion.walk(1.2, 2.0, 0.2)
       // val stretchShrink   : Motion = Motion.walk(0.6, 0.95, 0.2)
-      val fStretch = 1.1 /*1.0*/ : Ex[Double] // XXX TODO
 
       val useBound = false  : Ex[Boolean] // XXX TODO
       val boundEnd = false  : Ex[Boolean] // XXX TODO
@@ -1186,6 +1273,8 @@ object Builder {
         )
 
         Act(
+          actSetStretch,
+          fStretchN,  // XXX TODO --- where is this used?
           PrintLn("run select"),
           recRun,
         )
@@ -1204,7 +1293,7 @@ object Builder {
       }
 
       val span        = jitter(span1, r = jitAmt, secs = 0.2, minStart = 0L, maxStop = len0)
-      val newLength0  = minPhInsLen max (span.length * fStretch + (0.5: Ex[Double])).toLong
+      val newLength0  = minPhInsLen max (span.length * fStretchN + (0.5: Ex[Double])).toLong
       val newDiff0    = newLength0 - span.length
       val len1        = minPhaseLen max (maxPhaseLen min (len0 + newDiff0))
       val newDiff1    = len1 - len0
