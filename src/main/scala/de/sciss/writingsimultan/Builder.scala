@@ -30,7 +30,7 @@ import de.sciss.synth.proc.Workspace
 import de.sciss.writingsimultan.BuilderUtil._
 
 object Builder {
-  val DEFAULT_VERSION = 1
+  val DEFAULT_VERSION = 2
 
 //  protected def any2stringadd: Any = ()
 
@@ -142,10 +142,11 @@ object Builder {
 
     val fscOvrSelect = mkObj[S, FScape](fAux, "overwrite-select-fsc" , DEFAULT_VERSION)(mkFScOverwriteSelect[S]())
 
-    val sStretchStable = mkObj[S, LStream](fAux, "stretch-stable" , DEFAULT_VERSION)(mkStreamStretchStable[S]())
-    val sStretchGrow   = mkObj[S, LStream](fAux, "stretch-grow"   , DEFAULT_VERSION)(mkStreamStretchGrow  [S]())
-    val sStretchShrink = mkObj[S, LStream](fAux, "stretch-shrink" , DEFAULT_VERSION)(mkStreamStretchShrink[S]())
-    val sRNG           = mkObj[S, LStream](fAux, "rng"            , DEFAULT_VERSION)(mkStreamRNG          [S]())
+    val sStretchStable  = mkObj[S, LStream](fAux, "stretch-stable", DEFAULT_VERSION)(mkStreamStretchStable[S]())
+    val sStretchGrow    = mkObj[S, LStream](fAux, "stretch-grow"  , DEFAULT_VERSION)(mkStreamStretchGrow  [S]())
+    val sStretchShrink  = mkObj[S, LStream](fAux, "stretch-shrink", DEFAULT_VERSION)(mkStreamStretchShrink[S]())
+    val sSpaceDur       = mkObj[S, LStream](fAux, "space-dur"     , DEFAULT_VERSION)(mkStreamSpaceDur     [S]())
+    val sRNG            = mkObj[S, LStream](fAux, "rng"           , DEFAULT_VERSION)(mkStreamRNG          [S]())
 
     val pOvrSelect = mkObj[S, proc.Control](fAux, "overwrite-select", DEFAULT_VERSION) {
       mkCtlSelectOverwrite(
@@ -154,6 +155,7 @@ object Builder {
         strStretchStable  = sStretchStable,
         strStretchGrow    = sStretchGrow,
         strStretchShrink  = sStretchShrink,
+        strSpaceDur       = sSpaceDur,
         strRNG            = sRNG,
 //        phCount = phCount,
       )
@@ -353,13 +355,13 @@ object Builder {
         |which contain piezo speakers, arranged in a certain number of channels, and
         |thus the sound gesture may move around the circle as it evolves.
         |
-        |In the __first instance__ (_Writing Machine_), I used a television sound
+        |In the __first instance__ -- _Writing Machine_ -- I used a television sound
         |signal from a news channel. It was using 72 petri-dishes in three concentric
         |circles, each circle using graphite power of a different granularity and
         |appearence. The sound installation was run from a single computer, and
         |using eight or nine channels.
         |
-        |In the __second instance__ (_wr\_t\_ng m\_ch\_n\__), I used a local radio
+        |In the __second instance__ -- _wr\_t\_ng m\_ch\_n\__ -- I used a local radio
         |(FM) station signal. The petri-dish arrangement was identical, but this time
         |I experimented with a "distributed sound memory", using nine Raspberry Pis,
         |each representing two channels or memories which were evolved independent
@@ -368,11 +370,12 @@ object Builder {
         |visible, and I selected only one type of graphite and combined it with the
         |bodies of dead bees.
         |
-        |The physical arrangement of the __third instance__ is still not decided
+        |The physical arrangement of the __third instance__ -- _Writing (simultan)_ --
+        |is still not decided
         |(as of this writing), although I think I want to replace the "disc" like
         |shape of the petri-dish placement with a form that places them along the
         |walls of the exhibition site, e.g. on side boards. The new title
-        |_Writing (Simultan)_ also highlights a new interest in the
+        |also highlights a new interest in the
         |coming-together of otherwise independently operating processes. How this
         |is translated into the algorithms, will be elaborated in future versions
         |of this workspace.
@@ -391,11 +394,11 @@ object Builder {
         |for the formulation of the algorithms (notably the so-called the `Control`
         |object with its `Ex`, `Act`, `Trig` abstractions).
         |
-        |The current version is an early skeleton in which I have translated (and
-        |still simplified) the algorithm of _wr\_t\_ng m\_ch\_n\__, i.e. I took the
+        |The current version is an ongoing effort in which I have translated
+        |the algorithm of _wr\_t\_ng m\_ch\_n\__, i.e. I took the
         |plain Scala code of the control logic, and translated it into `Control`
-        |objects. This still does not contain the movements of the parameters over
-        |time, nor does it represent the networked multi-channel interaction, it
+        |objects. This still does it represent the
+        |__networked multi-channel interaction__, it
         |just implements a single channel of evolution.
         |
         |To run the experiment, you have to configure the _Mellite_ preferences
@@ -1145,6 +1148,15 @@ object Builder {
     s
   }
 
+  def mkStreamSpaceDur[S <: Sys[S]]()(implicit tx: S#Tx): LStream[S] = {
+    val s = LStream[S]()
+    import de.sciss.patterns.graph._
+    s.setGraph {
+      Brown(1.2, 2.4, 0.1)
+    }
+    s
+  }
+
   def mkStreamRNG[S <: Sys[S]]()(implicit tx: S#Tx): LStream[S] = {
     val s = LStream[S]()
     import de.sciss.patterns.graph._
@@ -1162,6 +1174,7 @@ object Builder {
                                           strStretchGrow  : LStream[S],
                                           strStretchShrink: LStream[S],
                                           strRNG          : LStream[S],
+                                          strSpaceDur     : LStream[S],
                                        )
                                        (implicit tx: S#Tx): proc.Control[S] = {
     val c = proc.Control[S]()
@@ -1171,6 +1184,7 @@ object Builder {
     c.attr.put("stretch-stable" , strStretchStable)
     c.attr.put("stretch-grow"   , strStretchGrow  )
     c.attr.put("stretch-shrink" , strStretchShrink)
+    c.attr.put("space-dur"      , strSpaceDur     )
     c.attr.put("rng"            , strRNG          )
 
     // c.attr.put("ph-count" , phCount)
@@ -1189,11 +1203,13 @@ object Builder {
       val len0  = ph0.numFrames
       val SR    = 48000.0
 
-      val minPhaseDur   =   3.0
-      val minPhInsDur   =   1.5 // 3.0
-      val maxPhaseDur   =  30.0 // 150.0
-      val minStabDur    =  10.0
-      val stableDurProb =   3.0 / 100
+      val minPhaseDur     =   3.0
+      val minPhInsDur     =   1.5 // 3.0
+      val maxPhaseDur     =  30.0 // 150.0
+      val minStabDur      =  10.0
+      val stableDurProb   =   3.0 / 100
+      val ovrBoundaryProb =   6.0 / 100
+
       val minPhaseLen   = (SR * minPhaseDur).toLong
       val minPhInsLen   = (SR * minPhInsDur).toLong
       val maxPhaseLen   = (SR * maxPhaseDur).toLong
@@ -1203,10 +1219,11 @@ object Builder {
       val mStretchGrow    = "stretch-grow"  .attr(noStream)
       val mStretchShrink  = "stretch-shrink".attr(noStream)
       val mStretchStable  = "stretch-stable".attr(noStream)
+      val mSpaceDur       = "space-dur"     .attr(noStream)
       val rng             = "rng"           .attr(noStream)
-      val rngN            = rng.next(0.5)
 
-      val pDur = len0 / SR // framesToSeconds(len0)
+      val pDur            = len0 / SR // framesToSeconds(len0)
+      val rngStableDur    = rng.next(0.5)
       val actSetStretch = If (pDur <= minPhaseDur) Then Act(
         PrintLn("-> grow"),
         mStretch.set(mStretchGrow)
@@ -1214,40 +1231,23 @@ object Builder {
         PrintLn("-> shrink"),
         mStretch.set(mStretchShrink)
       ) ElseIf (pDur > minStabDur) Then Act(
-        rngN, // "draw"
-        If (rngN < stableDurProb) Then Act(
+        rngStableDur, // "draw"
+        If (rngStableDur < stableDurProb) Then Act(
           PrintLn("-> stable"),
           mStretch.set(mStretchStable)
         )
       )
 
-      val fStretchN = mStretch.next(1.0)
+      val fStretchN   = mStretch.next(1.0)
+      val rngUseBound = rng.next(0.5)
+      val rngBoundEnd = rng.next(0.5)
+      val rngJitAmt   = rng.next(0.5)
 
-      // val useBound  = random.nextDouble() <= ovrBoundaryProb
-      // val boundEnd  = useBound && random.nextDouble() > 0.667
-      // val jitAmt    = random.nextDouble()
+      val useBound    = rngUseBound <= ovrBoundaryProb
+      val boundEnd    = useBound && (rngBoundEnd > 0.667)
+      val jitAmt      = rngJitAmt
 
-      // val spaceDur  = spaceDurMotion.step()
-      //
-      // val fut = If (len0 > minPhaseLen) Then {
-      //   SelectOverwrite(ph0.f, ctlCfg, spaceDur = spaceDur)
-      //   ???
-      // } Else {
-      //   txFutureSuccessful(Span(0L, 0L))
-      //   ???
-      // }
-
-      // val spaceDurMotion  : Motion = Motion.walk(1.2, 2.4, 0.1)
-
-      // val stretchStable   : Motion = Motion.linexp(Motion.walk(0, 1, 0.1), 0, 1, 1.0 / 1.1, 1.1)
-      // val stretchGrow     : Motion = Motion.walk(1.2, 2.0, 0.2)
-      // val stretchShrink   : Motion = Motion.walk(0.6, 0.95, 0.2)
-
-      val useBound = false  : Ex[Boolean] // XXX TODO
-      val boundEnd = false  : Ex[Boolean] // XXX TODO
-      val jitAmt   = 0.25   : Ex[Double]  // XXX TODO
-
-      val spaceDur = (1.2 * 1.41) : Ex[Double] // XXX TODO
+      val spaceDurN   = mSpaceDur.next(2.0)
       val spanStart0  = Var[Long]
       val spanStop0   = Var[Long]
 
@@ -1266,7 +1266,7 @@ object Builder {
 
       val actSelect: Act = {
         val recRun: Act = rSelect.runWith(
-          "space-dur" -> spaceDur,
+          "space-dur" -> spaceDurN,
           "in"        -> phFileIn,
           "start"     -> spanStart0,
           "stop"      -> spanStop0,
@@ -1274,8 +1274,9 @@ object Builder {
 
         Act(
           actSetStretch,
-          fStretchN,  // XXX TODO --- where is this used?
-          PrintLn("run select"),
+          spaceDurN,    // draw
+          fStretchN,    // used in `actDone`
+          PrintLn("run select; space-dur = " ++ spaceDurN.toStr),
           recRun,
         )
       }
@@ -1301,6 +1302,9 @@ object Builder {
 
       val actDone: Act =
         Act(
+          rngUseBound,
+          rngBoundEnd,
+          rngJitAmt,
           PrintLn("selected - start0: " ++ spanStart0.toStr ++
             " ; stop0: " ++ spanStop0.toStr ++
             " ; span: " ++ span.toStr ++
@@ -1314,22 +1318,6 @@ object Builder {
       loadBang    ---> actSelect
       selectDone  ---> actDone
       selectFail  ---> r.fail("overwrite-select failed")
-
-      // fut.map { span0 =>
-      //   val span1       = if (!useBound) span0 else {
-      //     if (boundEnd) Span(len0 - span0.length, len0)
-      //     else          Span(0L, span0.length)
-      //   }
-      //   val span        = jitter(span1, r = jitAmt, secs = 0.2f, minStart = 0L, maxStop = len0)
-      //   val newLength0  = max(minPhInsLen, (span.length * fStretch + 0.5).toLong)
-      //   val newDiff0    = newLength0 - span.length
-      //   val len1        = max(minPhaseLen, min(maxPhaseLen, len0 + newDiff0))
-      //   val newDiff1    = len1 - len0
-      //   val newLength   = newDiff1 + span.length
-      //   val instr       = OverwriteInstruction(span, newLength = newLength)
-      //   log(f"phSelectOverwrite() yields $instr; fStretch $fStretch%g, spaceDur $spaceDur%g")
-      //   instr
-      // }
     }
 
     c

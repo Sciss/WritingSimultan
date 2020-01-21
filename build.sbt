@@ -1,7 +1,7 @@
 lazy val baseName   = "WritingSimultan"
 lazy val baseNameL  = baseName.toLowerCase
 
-lazy val projectVersion = "0.3.0-SNAPSHOT"
+lazy val projectVersion = "0.3.0"
 
 lazy val deps = new {
   val main = new {
