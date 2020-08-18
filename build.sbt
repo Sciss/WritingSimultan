@@ -1,15 +1,15 @@
 lazy val baseName   = "WritingSimultan"
 lazy val baseNameL  = baseName.toLowerCase
 
-lazy val projectVersion = "0.3.0"
+lazy val projectVersion = "0.4.0-SNAPSHOT"
 
 lazy val deps = new {
   val main = new {
-    val fscape          = "2.33.1"
-    val lucre           = "3.16.1"
-    val lucreSwing      = "1.20.0"
-    val patterns        = "0.17.0"
-    val soundProcesses  = "3.33.0"
+    val fscape          = "2.36.1"
+    val lucre           = "3.17.6"
+    val lucreSwing      = "1.21.0"
+    val patterns        = "0.20.0"
+    val soundProcesses  = "3.35.8"
     val span            = "1.4.3"
   }
 }
@@ -22,7 +22,7 @@ lazy val commonSettings = Seq(
   homepage           := Some(url(s"https://git.iem.at/sciss/$baseName")),
   description        := "A sound installation",
   licenses           := Seq("AGPL v3+" -> url("http://www.gnu.org/licenses/agpl-3.0.txt")),
-  scalaVersion       := "2.13.0", // "2.13.1",
+  scalaVersion       := "2.13.3",
   scalacOptions     ++= Seq("-deprecation", "-unchecked", "-feature", "-encoding", "utf8", "-Xsource:2.13", "-Xlint:-stars-align,_"),
   scalacOptions     ++= {
     if (loggingEnabled || isSnapshot.value) Nil else Seq("-Xelide-below", "INFO")

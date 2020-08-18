@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/Sciss/WritingSimultan.svg?branch=master)](https://travis-ci.org/Sciss/WritingSimultan)
+[![Build Status](https://travis-ci.org/Sciss/WritingSimultan.svg?branch=main)](https://travis-ci.org/Sciss/WritingSimultan)
 
 # Writing (simultan)
 
@@ -8,9 +8,9 @@ implementing all aspects within a Mellite workspace. See
 
 Unless specified differently in the sub-projects, all code and materials are
 (C)opyright 2019–2020 by Hanns Holger Rutz. All rights reserved. This project is released under the
-[GNU Affero General Public License](https://git.iem.at/sciss/WritingSimultan/blob/master/LICENSE) v3+ and
+[GNU Affero General Public License](https://git.iem.at/sciss/WritingSimultan/blob/main/LICENSE) v3+ and
 comes with absolutely no warranties.
-To contact the author, send an email to `contact at sciss.de`.
+To contact the author, send an e-mail to `contact at sciss.de`.
 
 With respect to the workspace thus produced, all rights are reserved.
 No reuse or changes permitted without explicit written consent.
