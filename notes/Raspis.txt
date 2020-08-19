@@ -1,0 +1,40 @@
+"b8:27:eb:36:50:58" -> "192.168.0.22" {tisch 1 unten}
+"b8:27:eb:85:e5:30" -> "192.168.0.24" {tisch 1 mitte}
+"b8:27:eb:6c:da:98" -> "192.168.0.28" {tisch 1 oben } 3B+
+
+"b8:27:eb:76:1c:85" -> "192.168.0.13" {tisch 2 unten}
+"b8:27:eb:61:90:b9" -> "192.168.0.25" {tisch 2 mitte}
+"b8:27:eb:cc:12:f5" -> "192.168.0.27" {tisch 2 oben } 3B+
+
+"b8:27:eb:73:29:49" -> "192.168.0.23" {tisch 3 unten}
+"b8:27:eb:47:5a:5b" -> "192.168.0.47" {tisch 3 mitte} 3B+
+"b8:27:eb:10:dc:d2" -> "192.168.0.48" {tisch 3 oben } 3B+
+
+
+
+scp -r /data/projects/WritingSimultan/writing-simultan.mllt pi@192.168.0.22:Downloads/
+
+java -Dwriting.this=22 -Dwriting.next=24 -jar Mellite.jar
+
+RAM disk 256 MB:
+
+mkdir /tmp/ramdisk
+chmod 777 /tmp/ramdisk
+sudo mount -t tmpfs -o size=256m myramdisk /tmp/ramdisk
+
+(pro Kanal werden ca. 27% davon benutzt) (max observed 28%)
+
+
+
+val t = osc.UDP.Transmitter()
+// val tgt = "192.168.0.77" -> 57120
+val tgt = "192.168.0.22" -> 57120
+t.send(osc.Message("/next", 0), tgt)
+
+
+t.send(osc.Message("/shutdown"), tgt)
+t.send(osc.Message("/shutdown"), "192.168.0.24" -> 57120)
+t.send(osc.Message("/shutdown"), "192.168.0.28" -> 57120)
+
+
+

@@ -23,3 +23,9 @@ The _workspace_ produced is covered by the Creative Commons Attribution-ShareAli
 ## building
 
 All sub-projects build with sbt against Scala 2.13.
+
+## workspaces
+
+__Note:__ I am now developing the workspace directly in Mellite, so the source code generator is outdated.
+The latest stable version is in the `workspaces` directory.
+
